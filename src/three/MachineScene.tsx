@@ -192,11 +192,18 @@ function Adxl345Effect({ stateRef, position, onSelect, selected }: SensorAnchorP
           NO sensor markers and there was no way to tell which physical part
           was which. Identification must not depend on the power state. */}
       <mesh>
-        <sphereGeometry args={[0.012, 12, 12]} />
+        <sphereGeometry args={[0.016, 12, 12]} />
         <meshBasicMaterial color="#38bdf8" depthTest={false} />
       </mesh>
-      <Html center distanceFactor={1.7} position={[0, 0.05, 0]} zIndexRange={[20, 0]}>
-        <span className="pointer-events-none select-none whitespace-nowrap rounded bg-background/85 px-1.5 py-0.5 text-[9px] font-bold tracking-widest text-sky-300 ring-1 ring-sky-400/50">
+      {/* Leader line + label. The two sensors project close together when the
+          camera looks down the machine axis, so their labels must sit on
+          OPPOSITE sides of their markers or one covers the other. */}
+      <mesh position={[0, 0.03, 0]}>
+        <boxGeometry args={[0.003, 0.06, 0.003]} />
+        <meshBasicMaterial color="#38bdf8" depthTest={false} />
+      </mesh>
+      <Html center distanceFactor={1.7} position={[0, 0.075, 0]} zIndexRange={[30, 10]}>
+        <span className="pointer-events-none select-none whitespace-nowrap rounded bg-background/90 px-1.5 py-0.5 text-[10px] font-bold tracking-widest text-sky-300 ring-1 ring-sky-400/60">
           ADXL345
         </span>
       </Html>
@@ -257,11 +264,15 @@ function Inmp441Effect({ stateRef, position, onSelect, selected }: SensorAnchorP
     >
       {/* Always-visible marker + label — see the note on the ADXL345 group. */}
       <mesh>
-        <sphereGeometry args={[0.012, 12, 12]} />
+        <sphereGeometry args={[0.016, 12, 12]} />
         <meshBasicMaterial color="#fb923c" depthTest={false} />
       </mesh>
-      <Html center distanceFactor={1.7} position={[0, 0.05, 0]} zIndexRange={[20, 0]}>
-        <span className="pointer-events-none select-none whitespace-nowrap rounded bg-background/85 px-1.5 py-0.5 text-[9px] font-bold tracking-widest text-orange-300 ring-1 ring-orange-400/50">
+      <mesh position={[0, -0.03, 0]}>
+        <boxGeometry args={[0.003, 0.06, 0.003]} />
+        <meshBasicMaterial color="#fb923c" depthTest={false} />
+      </mesh>
+      <Html center distanceFactor={1.7} position={[0, -0.075, 0]} zIndexRange={[30, 10]}>
+        <span className="pointer-events-none select-none whitespace-nowrap rounded bg-background/90 px-1.5 py-0.5 text-[10px] font-bold tracking-widest text-orange-300 ring-1 ring-orange-400/60">
           INMP441
         </span>
       </Html>
