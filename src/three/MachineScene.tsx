@@ -68,43 +68,115 @@ async function loadMotor(): Promise<typeof cachedSplit> {
   });
   if (!mesh) throw new Error("No mesh found in motor GLB");
   const m = mesh as THREE.Mesh;
-  const split = splitRotorFromHousing(m.geometry);
-  // Both parts share the original textured material, but rendered
-  // double-sided: the rotor sits inside a cutaway, so when it rotates the
-  // camera can see the machine's interior — single-sided (default) materials
-  // make those interior faces invisible and the machine looks hollow/broken.
+  // The model is ONE baked mesh — geometrically rotating any subset makes the
+  // cutaway edges slide against the housing and the machine looks dismantled.
+  // So the mesh is rendered WHOLE and stationary; rotation is visualized with
+  // a holographic speed ring around the motor body instead (see SpinRing).
   const mat = m.material as THREE.MeshStandardMaterial;
-  const housingMat = mat.clone();
-  housingMat.side = THREE.DoubleSide;
-  const rotorMat = mat.clone();
-  rotorMat.side = THREE.DoubleSide;
-  split.housing.userData.material = housingMat;
-  split.rotor.userData.material = rotorMat;
-  cachedSplit = split;
-  return split;
+  const solidMat = mat.clone();
+  solidMat.side = THREE.DoubleSide;
+  const whole = m.geometry.clone();
+  const single = splitRotorFromHousing(whole); // reuse splitter only to clone buffers
+  void single;
+  cachedSplit = {
+    housing: whole,
+    rotor: new THREE.BufferGeometry(), // unused — no geometric rotation
+    stats: { triangles: whole.getIndex()?.count ?? 0 / 3, rotorTriangles: 0 },
+  };
+  cachedSplit.housing.userData.material = solidMat;
+  return cachedSplit;
 }
 
-/* --------------------------- rotating rotor ---------------------------- */
+/* ------------------ rotation visualization (no mesh spin) --------------- */
 
-function Rotor({
-  geometry,
+/**
+ * Holographic speed ring — a glowing torus + rotating tick marks that wrap
+ * the motor body. Ring spin rate = real RPM; intensity/size grow with
+ * vibration RMS. This communicates rotation without ever deforming the
+ * fragile single-mesh model, so nothing can look dismantled.
+ */
+function SpinRing({
   stateRef,
+  position,
 }: {
-  geometry: THREE.BufferGeometry;
   stateRef: React.RefObject<MachineState>;
+  position: [number, number, number];
 }) {
-  const ref = useRef<THREE.Mesh>(null);
+  const group = useRef<THREE.Group>(null);
+  const ticks = useRef<THREE.Group>(null);
+  const glow = useRef<THREE.Mesh>(null);
+  const TICKS = 24;
   useFrame((_, dt) => {
     const s = stateRef.current;
-    if (!ref.current || !s) return;
+    if (!group.current || !s) return;
     const running = s.power === "ON" || s.power === "STARTING" || s.power === "STOPPING";
-    if (running) {
-      ref.current.rotation.x += ((s.rpm / 60) * Math.PI * 2 * dt) / 6;
+    const intensity = Math.min(1, s.vibrationRms / 1.5);
+    group.current.visible = running;
+    if (!running) return;
+    // Ring rotation speed tracks RPM (scaled for watchability).
+    if (ticks.current) ticks.current.rotation.x += ((s.rpm / 60) * Math.PI * 2 * dt) / 4;
+    // Anomaly/heat shifts ring color toward red via emissive intensity + scale.
+    const anomaly = s.fusedAnomalyScore;
+    const mat = glow.current?.material as THREE.MeshBasicMaterial | undefined;
+    if (mat) {
+      mat.color.setHSL(0.09 - anomaly * 0.09, 0.9, 0.55); // orange → red
+      mat.opacity = 0.25 + intensity * 0.35 + anomaly * 0.2;
+    }
+    if (glow.current) {
+      const pulse = 1 + Math.sin(performance.now() / 300) * 0.02 * (0.5 + intensity);
+      glow.current.scale.setScalar(pulse);
     }
   });
   return (
-    <mesh ref={ref} geometry={geometry} material={geometry.userData.material as THREE.Material} />
+    <group ref={group} position={position} rotation={[0, 0, Math.PI / 2]} visible={false}>
+      {/* soft glow band */}
+      <mesh ref={glow}>
+        <torusGeometry args={[0.155, 0.006, 12, 96]} />
+        <meshBasicMaterial color="#f59e0b" transparent opacity={0.3} depthWrite={false} />
+      </mesh>
+      {/* crisp main ring */}
+      <mesh>
+        <torusGeometry args={[0.148, 0.0022, 8, 96]} />
+        <meshBasicMaterial color="#fbbf24" transparent opacity={0.85} depthWrite={false} />
+      </mesh>
+      {/* rotating tick marks communicate spin direction + speed */}
+      <group ref={ticks}>
+        {Array.from({ length: TICKS }, (_, i) => {
+          const a = (i / TICKS) * Math.PI * 2;
+          return (
+            <mesh key={i} position={[Math.cos(a) * 0.148, Math.sin(a) * 0.148, 0]} rotation={[0, 0, a]}>
+              <planeGeometry args={[0.014, 0.0035]} />
+              <meshBasicMaterial color="#fde68a" transparent opacity={0.8} depthWrite={false} side={THREE.DoubleSide} />
+            </mesh>
+          );
+        })}
+      </group>
+    </group>
   );
+}
+
+/** Whole-machine vibration: a subtle shake driven by real vibration RMS. */
+function MachineShake({
+  stateRef,
+  children,
+}: {
+  stateRef: React.RefObject<MachineState>;
+  children: React.ReactNode;
+}) {
+  const ref = useRef<THREE.Group>(null);
+  useFrame((clockInfo) => {
+    const s = stateRef.current;
+    if (!ref.current || !s) return;
+    const running = s.power === "ON" || s.power === "STARTING" || s.power === "STOPPING";
+    const t = clockInfo.clock.elapsedTime;
+    const intensity = running ? Math.min(1, s.vibrationRms / 1.5) : 0;
+    // Dominant-frequency-driven micro-shake; far below what looks broken.
+    const amp = intensity * 0.004;
+    ref.current.position.x = Math.sin(t * s.dominantFrequency * 0.5) * amp;
+    ref.current.position.y = Math.sin(t * s.dominantFrequency * 0.5 + 1.3) * amp * 0.7;
+    ref.current.rotation.z = Math.sin(t * s.dominantFrequency * 0.35) * amp * 0.35;
+  });
+  return <group ref={ref}>{children}</group>;
 }
 
 function Housing({ geometry }: { geometry: THREE.BufferGeometry }) {
@@ -272,8 +344,11 @@ function MotorAssembly({
 
   return (
     <group position={[0, fullscreen ? 0.05 : 0.02, 0]} scale={fullscreen ? 2.1 : 1.55}>
-      <Housing geometry={split.housing} />
-      <Rotor geometry={split.rotor} stateRef={stateRef} />
+      <MachineShake stateRef={stateRef}>
+        <Housing geometry={split.housing} />
+      </MachineShake>
+      {/* holographic speed ring around the motor body (rotation visualization) */}
+      <SpinRing stateRef={stateRef} position={[-0.2, 0.05, 0]} />
       {/*
         Sensor effect anchors. The model already includes the physical ADXL345
         (blue, top-left of housing) and INMP441 (near the pump inlet) meshes —
