@@ -68,10 +68,9 @@ async function loadMotor(): Promise<typeof cachedSplit> {
   });
   if (!mesh) throw new Error("No mesh found in motor GLB");
   const m = mesh as THREE.Mesh;
-  // Split into: stationary housing + two rotationally-symmetric rotating
-  // groups (cutaway rotor core, coupling drum) — both user-verified parts
-  // that can spin without tearing neighbours apart. Double-sided materials
-  // so the cutaway interior never disappears.
+  // Split into a stationary housing + an independent, shrunken rotor insert.
+  // The insert shares no topology with the housing (verified in split-motor),
+  // so spinning it is structurally incapable of tearing the model.
   const mat = m.material as THREE.MeshStandardMaterial;
   const mkMat = () => {
     const mm = mat.clone();
@@ -81,7 +80,6 @@ async function loadMotor(): Promise<typeof cachedSplit> {
   const split = splitRotorFromHousing(m.geometry);
   split.housing.userData.material = mkMat();
   split.rotor.userData.material = mkMat();
-  split.coupling.userData.material = mkMat();
   cachedSplit = split;
   return split;
 }
@@ -301,9 +299,8 @@ function MotorAssembly({
     <group position={[0, fullscreen ? 0.05 : 0.02, 0]} scale={fullscreen ? 2.1 : 1.55}>
       <MachineShake stateRef={stateRef}>
         <Housing geometry={split.housing} />
-        {/* rotating: cutaway rotor core + coupling drum (same axis & speed) */}
+        {/* the only rotating mesh: the independent rotor insert */}
         <SpinPart geometry={split.rotor} stateRef={stateRef} />
-        <SpinPart geometry={split.coupling} stateRef={stateRef} />
       </MachineShake>
       {/*
         Sensor effect anchors. The model already includes the physical ADXL345

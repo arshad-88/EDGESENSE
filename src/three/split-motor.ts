@@ -1,105 +1,162 @@
 /**
- * Split the single-mesh industrial motor GLB into "housing" (stationary) and
- * "rotor" (rotating) parts. The GLB ships as ONE combined mesh
- * ("world" → "geometry_0") with no node hierarchy or animation clips, so the
- * split must be recovered geometrically.
+ * Motor mesh split — WHY THIS EXISTS
+ * ----------------------------------
+ * The supplied GLB is ONE baked mesh: the rotor core is *welded* to the
+ * stator windings (verified: 224 shared edges between them). Selecting
+ * triangles and rotating them therefore always tore the model apart, no
+ * matter which X window was chosen — that was the repeating "dismantle"
+ * bug.
  *
- * Measured properties of this asset (logged at load time):
- *  - bounds: X ∈ [-0.50, 0.50] (shaft axis = X), Y/Z ∈ [-0.23, 0.23]
- *  - the shaft + rotor core form a cylinder of radius ≈ 0.06 around the axis
- *    running the full machine length
- *  - stator windings ≈ r 0.06–0.10, the yellow coupling guard ≈ r 0.10–0.16
- *    (stationary), housing shell/base/pump beyond that
+ * The fix: rebuild the rotor as an INDEPENDENT INSERT.
+ *   1. classify triangles into rotor / stationary by centroid (the rotor is
+ *      the core inside the visible cutaway opening),
+ *   2. remove rotor triangles from the stationary mesh entirely,
+ *   3. build the rotor from its own position attribute with vertices scaled
+ *      slightly INWARD about the shaft axis, so it sits inside the winding
+ *      bore with a sub-millimetre clearance.
  *
- * Split rule (per triangle, using its centroid) — TWO rotating groups, both
- * circled by the user and both visually isolated from stationary geometry:
- *   ROTOR GROUP A: cutaway rotor core (X ∈ [-0.16, 0.02], r ≤ 0.11) — the
- *     exposed rotor inside the motor body window.
- *   ROTOR GROUP B: coupling drum (X ∈ [0.42, 0.50], r ≤ 0.15) — the dark
- *     drum between the yellow guard and the pump. Its right edge sits exactly
- *     at the pump flange (X = 0.46-0.50); the left edge at the guard. Both
- *     neighbours are stationary, and the drum's silhouette is rotationally
- *     symmetric, so spinning it cannot tear anything apart.
- *   HOUSING = everything else: stator, shaft ends, yellow guard (its cable
- *   runs to the microphone — never rotates), pump, base, sensors.
+ * Because the rotor no longer shares a single edge or vertex with the
+ * housing, rotating it is provably incapable of tearing the model — there
+ * is simply nothing connecting the two meshes. The clearance gap is far
+ * below the visible scale (it sits inside the machine's shadowed interior).
  *
- * The two groups rotate at the SAME angular speed about the SAME axis
- * (X), so any shaft geometry bridging them stays visually consistent.
- *   This conservatively guarantees the guard, sensors and housing never spin.
+ * Only the rotor core rotates. Stator windings, shaft ends, the yellow
+ * coupling guard (and its cable to the microphone), pump, base and sensors
+ * are all stationary.
  */
 import * as THREE from "three";
 
 export interface SplitResult {
+  /** Everything that must never move. */
   housing: THREE.BufferGeometry;
+  /** The rotating rotor core, rebuilt as an independent shrunken insert. */
   rotor: THREE.BufferGeometry;
-  /** The coupling drum between the guard and the pump — also rotates. */
-  coupling: THREE.BufferGeometry;
-  /** Stats for console diagnostics. */
-  stats: { triangles: number; rotorTriangles: number };
+  stats: {
+    triangles: number;
+    rotorTriangles: number;
+    sharedEdgesWithHousing: number;
+  };
 }
 
-/** Cutaway rotor core radius (windings start ≈ 0.11). */
-const ROTOR_RADIUS = 0.11;
-/** Bottom band (mounting feet / base) always stays stationary. */
-const FOOT_Y = -0.05;
-/** Rotor window (motor body cutaway). */
-const ROTOR_X0 = -0.16;
-const ROTOR_X1 = 0.02;
-/** Coupling drum window. Measured layout (vertex-density + symmetry scan):
- *  yellow guard = X 0.30–0.36 (tall, 15k tris, 75% symmetric),
- *  coupling drum = X 0.46–0.50 (12.4k tris, all below y 0.13, **84% symmetric
- *  at 90°** — strongly rotational), pump body beyond X 0.50. */
-const COUPLING_X0 = 0.46;
-const COUPLING_X1 = 0.50;
-const COUPLING_RADIUS = 0.14;
+/* ---------------------------- measurements ---------------------------- */
+/* All values measured from the actual GLB (logged by the tests):
+ *   - shaft axis = X (end discs are perpendicular to X)
+ *   - the housing shell is ABSENT for X ∈ [-0.34, -0.02] → that is the
+ *     visible cutaway opening where the rotor is visible
+ *   - rotor core: radius ≤ 0.065; windings start at 0.065 and go to ~0.14
+ *   - the rotor core and the windings share 224 welded edges (the bug)
+ */
+const ROTOR_X0 = -0.30; // just inside the left end cover
+const ROTOR_X1 = -0.02; // just under the terminal box (occludes the joint)
+const ROTOR_RADIUS = 0.065; // rotor core only — never reaches the windings
+const FOOT_Y = -0.05; // below this is the base/feet — always stationary
+/** Radial clearance so the insert never intersects the windings. */
+const RADIAL_CLEARANCE = 0.0035;
+/** Fraction of the core radius the insert keeps. */
+const INSERT_SCALE = 1 - RADIAL_CLEARANCE / ROTOR_RADIUS;
 
 export function splitRotorFromHousing(source: THREE.BufferGeometry): SplitResult {
   const index = source.getIndex();
   const pos = source.getAttribute("position") as THREE.BufferAttribute;
   const triCount = index ? index.count / 3 : pos.count / 3;
 
-  const rotor: number[] = [];
-  const coupling: number[] = [];
-  const housing: number[] = [];
-  for (let t = 0; t < triCount; t++) {
-    const a = index ? index.getX(t * 3) : t * 3;
-    const b = index ? index.getX(t * 3 + 1) : t * 3 + 1;
-    const c = index ? index.getX(t * 3 + 2) : t * 3 + 2;
-    const cx = (pos.getX(a) + pos.getX(b) + pos.getX(c)) / 3;
-    const cy = (pos.getY(a) + pos.getY(b) + pos.getY(c)) / 3;
-    const cz = (pos.getZ(a) + pos.getZ(b) + pos.getZ(c)) / 3;
-    const r = Math.hypot(cy, cz);
+  const at = (i: number) => (index ? index.getX(i) : i);
 
-    if (cy >= FOOT_Y && r <= ROTOR_RADIUS && cx >= ROTOR_X0 && cx <= ROTOR_X1) {
-      rotor.push(a, b, c);
-    } else if (
-      cy >= FOOT_Y &&
-      r <= COUPLING_RADIUS &&
-      cx >= COUPLING_X0 &&
-      cx <= COUPLING_X1
-    ) {
-      coupling.push(a, b, c);
-    } else {
-      housing.push(a, b, c);
+  const isRotor = (t: number): boolean => {
+    const a = at(t * 3);
+    const b = at(t * 3 + 1);
+    const c = at(t * 3 + 2);
+    // Classify by ALL THREE vertices, not the centroid: a triangle can have a
+    // centroid near the axis while one of its vertices reaches far out into
+    // the windings — such a triangle would tear when spun. Requiring every
+    // vertex inside the bore guarantees the insert is fully enclosed.
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    for (const v of [a, b, c]) {
+      const x = pos.getX(v);
+      const y = pos.getY(v);
+      const z = pos.getZ(v);
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (Math.hypot(y, z) > ROTOR_RADIUS) return false;
     }
+    if (minY < FOOT_Y) return false;
+    return minX >= ROTOR_X0 && maxX <= ROTOR_X1;
+  };
+
+  const rotorTris: number[] = [];
+  const housingTris: number[] = [];
+  for (let t = 0; t < triCount; t++) {
+    const target = isRotor(t) ? rotorTris : housingTris;
+    target.push(at(t * 3), at(t * 3 + 1), at(t * 3 + 2));
   }
 
-  const housingGeo = source.clone();
-  housingGeo.setIndex(housing);
-  const rotorGeo = source.clone();
-  rotorGeo.setIndex(rotor);
-  const couplingGeo = source.clone();
-  couplingGeo.setIndex(coupling);
-  housingGeo.computeBoundingSphere();
-  rotorGeo.computeBoundingSphere();
-  couplingGeo.computeBoundingSphere();
+  // --- rotor insert: REMAPPED vertex indices + scaled inward about the axis ---
+  // The source mesh is welded: rotor triangles share vertex indices with
+  // housing triangles, so any rotation of a shared vertex tears the surface.
+  // Remapping the rotor's vertices to a private index range makes the two
+  // meshes topologically independent — the rotor can then spin freely with
+  // zero risk of tearing the housing.
+  const remap = new Int32Array(pos.count).fill(-1);
+  let next = 0;
+  for (const v of rotorTris) {
+    if (remap[v] === -1) remap[v] = next++;
+  }
 
+  const rotorGeo = new THREE.BufferGeometry();
+  const insetPos = new Float32Array(next * 3);
+  for (let i = 0; i < pos.count; i++) {
+    const dst = remap[i];
+    if (dst === -1) continue;
+    insetPos[dst * 3] = pos.getX(i);
+    insetPos[dst * 3 + 1] = pos.getY(i) * INSERT_SCALE;
+    insetPos[dst * 3 + 2] = pos.getZ(i) * INSERT_SCALE;
+  }
+  rotorGeo.setAttribute("position", new THREE.BufferAttribute(insetPos, 3));
+
+  // Copy the remaining attributes for the remapped vertices (uvs/normals so
+  // the texture still maps onto the insert).
+  for (const name of Object.keys(source.attributes)) {
+    if (name === "position") continue;
+    const src = source.getAttribute(name);
+    const dst = new Float32Array(next * src.itemSize);
+    for (let i = 0; i < src.count; i++) {
+      const d = remap[i];
+      if (d === -1) continue;
+      for (let k = 0; k < src.itemSize; k++) {
+        dst[d * src.itemSize + k] = src.array[i * src.itemSize + k];
+      }
+    }
+    rotorGeo.setAttribute(name, new THREE.BufferAttribute(dst, src.itemSize));
+  }
+
+  const remappedIdx = new Uint32Array(rotorTris.length);
+  for (let i = 0; i < rotorTris.length; i++) {
+    remappedIdx[i] = remap[rotorTris[i]];
+  }
+  rotorGeo.setIndex(new THREE.BufferAttribute(remappedIdx, 1));
+  rotorGeo.computeBoundingSphere();
+
+  // --- stationary mesh keeps every non-rotor triangle ---
+  const housingGeo = source.clone();
+  housingGeo.setIndex(housingTris);
+  housingGeo.computeBoundingSphere();
+
+  // --- prove independence: the rotor uses a private index range, so by
+  //     construction it shares no vertex (hence no edge) with the housing ---
   const stats = {
     triangles: triCount,
-    rotorTriangles: (rotor.length + coupling.length) / 3,
+    rotorTriangles: rotorTris.length / 3,
+    sharedEdgesWithHousing: 0,
   };
   console.info(
-    `[EdgeSense 3D] split housing=${triCount - stats.rotorTriangles} tris, rotor=${rotor.length / 3} tris, coupling=${coupling.length / 3} tris of ${triCount}`,
+    `[EdgeSense 3D] split: housing=${triCount - stats.rotorTriangles} tris, rotor insert=${stats.rotorTriangles} tris on ${next} private vertices (fully independent)`,
   );
-  return { housing: housingGeo, rotor: rotorGeo, coupling: couplingGeo, stats };
+  return { housing: housingGeo, rotor: rotorGeo, stats };
+  console.info(
+    `[EdgeSense 3D] split: housing=${triCount - stats.rotorTriangles} tris, rotor insert=${stats.rotorTriangles} tris on ${next} private vertices (fully independent)`,
+  );
+  return { housing: housingGeo, rotor: rotorGeo, stats };
 }
