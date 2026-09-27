@@ -1,29 +1,39 @@
-import { useMemo, useState } from "react";
-import { motion } from "framer-motion";
-import { Loader2, TriangleAlert, LogOut, Radio } from "lucide-react";
+import { useMemo } from "react";
+import { TriangleAlert, LogOut, Waves, Loader2 } from "lucide-react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/hooks/use-auth";
-import { useEdgeSense } from "@/hooks/use-edgesense";
-import { MachineHero } from "@/components/edgesense/MachineHero";
+import { useMachine } from "@/hooks/use-machine";
+import { MachineCenter } from "@/components/edgesense/MachineCenter";
 import { BehaviourMap } from "@/components/edgesense/BehaviourMap";
 import { FingerprintRadar } from "@/components/edgesense/FingerprintRadar";
 import { AnomalySignature } from "@/components/edgesense/AnomalySignature";
 import { InvestigationFlow } from "@/components/edgesense/InvestigationFlow";
-import { ControlConsole } from "@/components/edgesense/ControlConsole";
 import { TelemetryPanel } from "@/components/edgesense/TelemetryPanel";
-import { BehaviourTransition } from "@/components/edgesense/BehaviourTransition";
-import { Badge } from "@/components/ui/badge";
+import { WhatIfConsole } from "@/components/edgesense/WhatIfConsole";
 import { Button } from "@/components/ui/button";
-import { Waves } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 
 export default function Dashboard() {
-  const engine = useEdgeSense();
   const { signOut } = useAuth();
   const navigate = useNavigate();
-  const [mapSensor, setMapSensor] = useState<"ADXL345" | "INMP441">("ADXL345");
+  const {
+    machine,
+    machineRef,
+    startupStep,
+    audioAvailable,
+    snapshot,
+    startMotor,
+    stopMotor,
+    setBehaviour,
+    applySimOverride,
+    resetSimOverride,
+    simConfig,
+    baselineReady,
+    retrain,
+  } = useMachine();
 
-  const snapshot = engine.snapshot;
   const latest = snapshot?.latest ?? null;
+  const running = machine.power === "ON" || machine.power === "STARTING";
 
   // Baselines per cell key for the heatmap tooltips.
   const baselinesByKey = useMemo(() => {
@@ -33,8 +43,6 @@ export default function Dashboard() {
     return out;
   }, [snapshot]);
 
-  // Raw values per row per cell key (merge both sensors; acoustic overwrites
-  // only its own keys since feature names are namespaced by sensor).
   const valuesByKey = useMemo(() => {
     const byTs = new Map<number, Record<string, number>>();
     for (const f of snapshot?.frames ?? []) {
@@ -50,35 +58,16 @@ export default function Dashboard() {
     return (snapshot?.heatmap ?? []).map((r) => byTs.get(r.timestamp) ?? {});
   }, [snapshot]);
 
-  if (engine.status === "loading" || engine.status === "training") {
+  if (!baselineReady) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center gap-3 bg-background">
         <Loader2 className="size-6 animate-spin text-primary" />
         <p className="text-sm text-muted-foreground">
-          {engine.status === "training"
-            ? "Learning what normal looks like — training on healthy data…"
-            : "Starting the observatory…"}
+          Learning what normal looks like — training the isolation forest…
         </p>
       </main>
     );
   }
-
-  if (engine.status === "error") {
-    return (
-      <main className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background p-6">
-        <TriangleAlert className="size-8 text-status-anomaly" />
-        <p className="text-sm text-muted-foreground">{engine.error}</p>
-        <Button onClick={engine.retrain}>Retry training</Button>
-      </main>
-    );
-  }
-
-  const vibRms = latest?.vibration.features.values.rms ?? 0;
-  const baseRms = baselinesByKey["ADXL345:rms"] ?? 1;
-  const indicator = Math.max(
-    latest?.vibration.anomaly.anomalyIndicator ?? 0,
-    latest?.acoustic.anomaly.anomalyIndicator ?? 0,
-  );
 
   return (
     <main className="min-h-screen bg-background pb-14">
@@ -91,23 +80,21 @@ export default function Dashboard() {
             </div>
             <div className="leading-tight">
               <p className="text-[13px] font-bold tracking-[0.22em]">EDGESENSE</p>
-              <p className="text-[10px] text-muted-foreground">Machine Behaviour Intelligence Center</p>
+              <p className="text-[10px] text-muted-foreground">Industrial Machine Intelligence</p>
             </div>
           </div>
+          <Badge variant="outline" className="px-1.5 py-0 text-[9px] tracking-widest text-primary">
+            ● SIMULATION MODE
+          </Badge>
           <Badge variant="outline" className="px-1.5 py-0 text-[9px] tracking-widest text-muted-foreground">
-            SIMULATED DATA
+            SYNTHETIC SENSOR STREAM
           </Badge>
           <div className="ml-auto flex items-center gap-3 text-[11px] text-muted-foreground">
             <span className="flex items-center gap-1.5">
-              <Radio className="size-3 text-status-healthy" />
-              streaming
-            </span>
-            <span>
-              baseline{" "}
-              <span className="text-foreground">
-                {engine.trainedAt ? new Date(engine.trainedAt).toLocaleTimeString() : "—"}
-              </span>{" "}
-              · {engine.sampleCount} windows
+              <span
+                className={`size-1.5 rounded-full ${running ? "animate-pulse bg-status-healthy" : "bg-muted-foreground"}`}
+              />
+              {running ? "acquisition active" : "acquisition inactive"}
             </span>
             <button
               className="underline-offset-2 hover:text-foreground hover:underline"
@@ -123,39 +110,29 @@ export default function Dashboard() {
       </header>
 
       <div className="mx-auto max-w-[1500px] space-y-5 px-5 pt-4">
-        {engine.activeScenario ? (
-          <motion.div
-            initial={{ opacity: 0, y: -6 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="flex items-center gap-3 rounded border border-chart-2/40 bg-chart-2/10 px-3 py-1.5 text-xs"
-          >
-            <span className="size-1.5 animate-pulse rounded-full bg-chart-2" />
-            <span className="font-semibold">{engine.activeScenario.title}</span>
-            <span className="text-muted-foreground">step: {engine.activeScenario.stepLabel}</span>
-          </motion.div>
-        ) : null}
+        {/* ============ HERO: 3D machine + control + live metrics ============ */}
+        <MachineCenter
+          machine={machine}
+          machineRef={machineRef}
+          startupStep={startupStep}
+          audioAvailable={audioAvailable}
+          onStart={startMotor}
+          onStop={stopMotor}
+          onBehaviour={setBehaviour}
+        />
 
-        {/* ============ HERO: machine + status + transition ============ */}
-        <section className="grid gap-5 lg:grid-cols-[1.1fr_1fr]">
-          <div className="rounded-lg border border-border/60 bg-card/50 p-4">
-            <MachineHero
-              frame={latest}
-              vibrationRms={vibRms}
-              baselineRms={baseRms}
-              anomalyIndicator={indicator}
-            />
-          </div>
-          <div className="flex flex-col gap-4">
-            <div className="rounded-lg border border-border/60 bg-card/50 p-4">
-              <BehaviourTransition frame={latest} />
-            </div>
-            <div className="min-h-0 flex-1 rounded-lg border border-border/60 bg-card/50 p-4">
-              <TelemetryPanel frame={latest} />
-            </div>
-          </div>
+        {/* ============ TELEMETRY: waveforms + FFT (live only) ============ */}
+        <section className="rounded-lg border border-border/60 bg-card/50 p-4">
+          {running && latest ? (
+            <TelemetryPanel frame={latest} />
+          ) : (
+            <p className="py-8 text-center text-xs text-muted-foreground">
+              No signal — start the motor to begin acquisition.
+            </p>
+          )}
         </section>
 
-        {/* ============ INTELLIGENCE: map + fingerprint ============ */}
+        {/* ============ INTELLIGENCE: cloud + fingerprint ============ */}
         <section className="grid gap-5 lg:grid-cols-2">
           <div className="rounded-lg border border-border/60 bg-card/50 p-4">
             <BehaviourMap
@@ -163,10 +140,12 @@ export default function Dashboard() {
               live={snapshot?.cloud.live ?? []}
               trajectory={snapshot?.cloud.trajectory ?? []}
               currentIsAnomaly={
-                (mapSensor === "ADXL345" ? latest?.vibration.anomaly.isAnomaly : latest?.acoustic.anomaly.isAnomaly) ?? false
+                latest
+                  ? latest.fusion.decision === "corroborated-anomaly"
+                  : machine.fusedAnomalyScore > 0.7
               }
-              sensor={mapSensor}
-              onSensorChange={setMapSensor}
+              sensor="ADXL345"
+              onSensorChange={() => {}}
             />
           </div>
           <div className="rounded-lg border border-border/60 bg-card/50 p-4">
@@ -177,7 +156,7 @@ export default function Dashboard() {
           </div>
         </section>
 
-        {/* ============ ANOMALY SIGNATURE (full width) ============ */}
+        {/* ============ ANOMALY SIGNATURE (heatmap, full width) ============ */}
         <section className="rounded-lg border border-border/60 bg-card/50 p-4">
           <AnomalySignature
             rows={snapshot?.heatmap ?? []}
@@ -188,15 +167,23 @@ export default function Dashboard() {
 
         {/* ============ INVESTIGATION ============ */}
         <section className="rounded-lg border border-border/60 bg-card/50 p-4">
-          <InvestigationFlow frame={latest} />
+          {latest ? (
+            <InvestigationFlow frame={latest} />
+          ) : (
+            <p className="py-8 text-center text-xs text-muted-foreground">
+              Anomaly investigation activates once the machine is running.
+            </p>
+          )}
         </section>
 
-        {/* ============ CONTROL CONSOLE ============ */}
+        {/* ============ WHAT-IF SIMULATOR ============ */}
         <section className="rounded-lg border border-border/60 bg-card/50 p-4">
-          <ControlConsole
-            engine={engine}
-            currentDominantFreq={latest?.vibration.features.values.dominantFreq ?? 0}
-            baselineDominantFreq={baselinesByKey["ADXL345:dominantFreq"] ?? 0}
+          <WhatIfConsole
+            machine={machine}
+            simConfig={simConfig}
+            onApply={applySimOverride}
+            onReset={resetSimOverride}
+            onRetrain={retrain}
           />
         </section>
       </div>

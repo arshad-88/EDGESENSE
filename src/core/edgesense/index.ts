@@ -36,3 +36,15 @@ export type {
   PipelineSnapshot,
   FingerprintBarLite,
 } from "./pipeline";
+export {
+  BEHAVIOUR_PROFILES,
+  BEHAVIOUR_LABELS,
+  STARTUP_STEPS,
+  MachineStateEngine,
+} from "./machine-state";
+export type {
+  Behaviour,
+  Power,
+  MachineState,
+  BehaviourProfile,
+} from "./machine-state";
