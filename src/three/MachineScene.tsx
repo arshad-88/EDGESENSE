@@ -144,20 +144,12 @@ function Adxl345Effect({ stateRef, position, onSelect, selected }: SensorAnchorP
         onSelect("ADXL345");
       }}
     >
-      {/* click target + visible marker over the sensor location */}
-      <mesh position={[0, 0, 0]} onClick={(e) => { e.stopPropagation(); onSelect("ADXL345"); }}>
-        <sphereGeometry args={[0.028, 16, 16]} />
-        <meshStandardMaterial
-          color="#38bdf8"
-          emissive="#38bdf8"
-          emissiveIntensity={selected ? 2 : 0.9}
-        />
-      </mesh>
+      {/* invisible click target over the sensor location (no visual ball) */}
       <mesh
         position={[0, 0, 0]}
         onClick={(e) => { e.stopPropagation(); onSelect("ADXL345"); }}
       >
-        <sphereGeometry args={[0.06, 8, 8]} />
+        <sphereGeometry args={[0.07, 8, 8]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
       {Array.from({ length: RING_COUNT }, (_, i) => (
@@ -208,20 +200,12 @@ function Inmp441Effect({ stateRef, position, onSelect, selected }: SensorAnchorP
         onSelect("INMP441");
       }}
     >
-      {/* click target + visible marker over the sensor location */}
-      <mesh position={[0, 0, 0]} onClick={(e) => { e.stopPropagation(); onSelect("INMP441"); }}>
-        <sphereGeometry args={[0.028, 16, 16]} />
-        <meshStandardMaterial
-          color="#fb923c"
-          emissive="#fb923c"
-          emissiveIntensity={selected ? 2 : 0.9}
-        />
-      </mesh>
+      {/* invisible click target over the sensor location (no visual ball) */}
       <mesh
         position={[0, 0, 0]}
         onClick={(e) => { e.stopPropagation(); onSelect("INMP441"); }}
       >
-        <sphereGeometry args={[0.06, 8, 8]} />
+        <sphereGeometry args={[0.07, 8, 8]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
       {Array.from({ length: RING_COUNT }, (_, i) => (

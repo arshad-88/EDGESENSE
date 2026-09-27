@@ -33,11 +33,11 @@ export interface SplitResult {
 const ROTOR_RADIUS = 0.11;
 /** Bottom band (mounting feet / base) always stays stationary. */
 const FOOT_Y = -0.05;
-/** The exposed cutaway rotor window (between end cover and coupling guard).
- * Everything outside this X range stays stationary — incl. the yellow guard
- * (X > 0.12) so its cable to the microphone never disconnects. */
+/** The exposed cutaway rotor window (motor body only). Everything outside
+ * this X range stays stationary — shaft ends, the yellow coupling guard
+ * (X > 0.02 side) and its cable to the microphone never rotate. */
 const ROTOR_X0 = -0.16;
-const ROTOR_X1 = 0.06;
+const ROTOR_X1 = 0.02;
 
 export function splitRotorFromHousing(source: THREE.BufferGeometry): SplitResult {
   const index = source.getIndex();
