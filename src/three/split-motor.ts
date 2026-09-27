@@ -12,11 +12,13 @@
  *    covers live at large |r|
  *
  * Split rule (per triangle, using its centroid):
- *   1. anything outside the housing shell envelope → ROTOR candidate
- *   2. within the envelope: points with small |y,z| radius that sit in X
- *      ranges where the housing shell is ABSENT (no large-radius geometry at
- *      that slice) belong to the exposed rotor/shaft/fan
- *   3. feet and mounting base (bottom of Y) are always HOUSING
+ *   1. the mounting base/feet (bottom of Y) are always HOUSING
+ *   2. "shell" X-slices are those containing large-radius geometry ABOVE the
+ *      base (y > -0.05) — end covers, housing barrel, terminal box, pump
+ *   3. small-radius (≤ 0.105) geometry in NON-shell slices is the exposed
+ *      rotor / shaft / internal fan → ROTOR
+ *   4. everything else (small-radius parts inside shell slices, e.g. bearings
+ *      and coupling seen through the cutaway) stays HOUSING for stability
  *
  * The result is two BufferGeometries reusing the original attribute buffers
  * with index ranges — no vertex data is copied, so it's fast and memory-safe.
@@ -52,7 +54,7 @@ export function splitRotorFromHousing(source: THREE.BufferGeometry): SplitResult
     const y = pos.getY(i);
     const z = pos.getZ(i);
     const r = Math.hypot(y, z);
-    if (r > 0.16) {
+    if (r > 0.16 && y > -0.05) {
       const si = Math.min(SLICES - 1, Math.max(0, Math.floor(((x - X0) / (X1 - X0)) * SLICES)));
       shellSlice[si] = 1;
     }
@@ -78,27 +80,19 @@ export function splitRotorFromHousing(source: THREE.BufferGeometry): SplitResult
     const r = Math.hypot(cy, cz);
 
     let part: MachinePart;
-    if (cy < FOOT_Y || cy > 0.20) {
-      // Feet / top lifting region — housing.
+    if (cy < FOOT_Y) {
+      // Mounting feet / base — always stationary.
       part = "housing";
     } else {
       const si = Math.min(SLICES - 1, Math.max(0, Math.floor(((cx - X0) / (X1 - X0)) * SLICES)));
       const shellHere = shellDil[si] === 1;
-      if (r <= ROTOR_MAX_RADIUS && !shellHere) {
-        // Exposed shaft / rotor / internal fan in the open section.
-        part = "rotor";
-      } else if (r <= ROTOR_MAX_RADIUS * 0.55 && !shellHere && cx > -0.15 && cx < 0.15) {
-        // Centre hub of the internal fan (slightly larger allowance).
-        part = "rotor";
-      } else {
-        part = "housing";
-      }
+      part = !shellHere && r <= ROTOR_MAX_RADIUS ? "rotor" : "housing";
     }
     (part === "rotor" ? rotor : housing).push(a, b, c);
   }
 
   const housingGeo = source.clone();
-  housingGeo.setIndex(rotor);
+  housingGeo.setIndex(housing);
   const rotorGeo = source.clone();
   rotorGeo.setIndex(rotor);
   housingGeo.computeBoundingSphere();

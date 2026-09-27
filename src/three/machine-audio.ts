@@ -21,11 +21,14 @@ export class MachineAudio {
   private lfo: OscillatorNode | null = null;
   private lfoGain: GainNode | null = null;
   /** Updated by the render loop from the central machine state. */
-  private target: { level: number; rpm: number; anomaly: number } = {
+  private target: { level: number; rpm: number; anomaly: number; behaviour: string } = {
     level: 0,
     rpm: 0,
     anomaly: 0,
+    behaviour: "NORMAL",
   };
+  /** Extra gain ramp on start/stop so the motor spins up/down audibly. */
+  private envelope = 0;
   available = true;
 
   /** Must be called from a user-gesture handler (START MOTOR click). */
@@ -116,6 +119,7 @@ export class MachineAudio {
       level: on ? 0.35 + Math.min(0.35, state.acousticLevel / 250) : 0,
       rpm: state.rpm,
       anomaly: state.fusedAnomalyScore,
+      behaviour: state.behaviour,
     };
   }
 
@@ -124,25 +128,53 @@ export class MachineAudio {
     const ctx = this.ctx;
     if (!ctx || !this.master) return;
     const t = ctx.currentTime;
-    const smooth = 0.25;
-    this.master.gain.setTargetAtTime(this.target.level, t, smooth);
+
+    // Envelope: slow spin-up (~2.5 s) when running, slow coast-down (~2.5 s)
+    // when stopped — a real machine never snaps on/off.
+    const running = this.target.level > 0;
+    const envRate = running ? 1 / 2.5 : -1 / 2.5; // envelope units per second
+    this.envelope = Math.max(0, Math.min(1, this.envelope + envRate * 0.25));
+    // Soft-saturation curve for a natural swell.
+    const env = this.envelope * this.envelope * (3 - 2 * this.envelope); // smoothstep
+
+    // Per-behaviour tone shaping.
+    const b = this.target.behaviour;
+    const heavy = b === "HEAVY_LOAD" ? 1 : 0;
+    const anom = b === "ANOMALY" ? 1 : 0;
+
+    const baseLevel = this.target.level;
+    this.master.gain.setTargetAtTime(baseLevel * env, t, 0.25);
+
     const f = Math.max(4, (this.target.rpm / 60) * 2.0); // 2 electrical passes per rev
+    // HEAVY LOAD ≈ 8% lower pitch (strained), ANOMALY ≈ 10% higher + wobble.
+    const pitchShift = 1 - heavy * 0.08 + anom * 0.1;
     for (const osc of this.oscs) {
       const mult = (osc as OscillatorNode & { _mult?: number })._mult ?? 1;
-      osc.frequency.setTargetAtTime(f * mult, t, smooth);
+      osc.frequency.setTargetAtTime(f * mult * pitchShift, t, 0.3);
+    }
+    // Mix: heavy load favours the low layer, anomaly brightens the top layers.
+    if (this.oscGains.length >= 3) {
+      this.oscGains[0].gain.setTargetAtTime(0.5 + heavy * 0.2 - anom * 0.1, t, 0.3);
+      this.oscGains[1].gain.setTargetAtTime(0.22 + anom * 0.15, t, 0.3);
+      this.oscGains[2].gain.setTargetAtTime(0.1 + anom * 0.22, t, 0.3);
     }
     if (this.noiseFilter)
-      this.noiseFilter.frequency.setTargetAtTime(300 + this.target.anomaly * 900, t, smooth);
+      this.noiseFilter.frequency.setTargetAtTime(
+        300 + this.target.anomaly * 900 + heavy * 150,
+        t,
+        0.3,
+      );
     if (this.noiseGain)
-      this.noiseGain.gain.setTargetAtTime(0.1 + this.target.anomaly * 0.25, t, smooth);
-    if (this.lfo) this.lfo.frequency.setTargetAtTime(6 + this.target.anomaly * 9, t, smooth);
-    if (this.lfoGain)
-      this.lfoGain.gain.setTargetAtTime(this.target.anomaly * 0.18, t, smooth);
+      this.noiseGain.gain.setTargetAtTime((0.1 + this.target.anomaly * 0.25) * env, t, 0.3);
+    // Irregularity: gentle at normal, pronounced roughness at anomaly.
+    if (this.lfo) this.lfo.frequency.setTargetAtTime(6 + anom * 9 + heavy * 2, t, 0.3);
+    if (this.lfoGain) this.lfoGain.gain.setTargetAtTime((anom * 0.22 + heavy * 0.06) * env, t, 0.3);
   }
 
   stop(): void {
     if (!this.ctx || !this.master) return;
-    this.master.gain.setTargetAtTime(0, this.ctx.currentTime, 0.4);
+    // Envelope in update() handles the slow coast-down; just mark stopped.
+    this.target = { level: 0, rpm: 0, anomaly: 0, behaviour: this.target.behaviour };
   }
 
   dispose(): void {
