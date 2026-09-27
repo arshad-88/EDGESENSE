@@ -20,27 +20,20 @@ function loadGeometry(): THREE.BufferGeometry {
   const jsonLen = buf.readUInt32LE(12);
   const json = JSON.parse(buf.slice(20, 20 + jsonLen).toString());
   const binStart = 20 + jsonLen + 8;
-  const posAcc = json.accessors[1];
-  const idxAcc = json.accessors[0];
-  const pv = json.bufferViews[posAcc.bufferView];
-  const iv = json.bufferViews[idxAcc.bufferView];
-  const pos = new Float32Array(
-    buf.buffer,
-    buf.byteOffset + binStart + pv.byteOffset + posAcc.byteOffset,
-    posAcc.count * 3,
-  );
-  const idx =
-    posAcc.count > 65535
-      ? new Uint32Array(
-          buf.buffer,
-          buf.byteOffset + binStart + iv.byteOffset + idxAcc.byteOffset,
-          idxAcc.count,
-        )
-      : new Uint16Array(
-          buf.buffer,
-          buf.byteOffset + binStart + iv.byteOffset + idxAcc.byteOffset,
-          idxAcc.count,
-        );
+  // NOTE: accessor.byteOffset is optional in glTF — omitting it means 0, not
+  // NaN. Reading it as `acc.byteOffset` directly silently produced a corrupt
+  // buffer here, which is how the "welded mesh" belief went unchallenged.
+  const read = (accessorIndex: number, Ctor: typeof Float32Array | typeof Uint32Array) => {
+    const acc = json.accessors[accessorIndex];
+    const view = json.bufferViews[acc.bufferView];
+    return new Ctor(
+      buf.buffer,
+      buf.byteOffset + binStart + view.byteOffset + (acc.byteOffset ?? 0),
+      acc.count * (Ctor === Float32Array ? 3 : 1),
+    );
+  };
+  const pos = read(1, Float32Array);
+  const idx = read(0, Uint32Array);
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
   geo.setIndex(new THREE.BufferAttribute(idx, 1));
@@ -168,5 +161,128 @@ describe("motor splitter invariants (real GLB)", () => {
       }
     }
     expect(maxR).toBeLessThan(0.065);
+  });
+
+  it("NO piece of the model is ever split between rotor and housing", () => {
+    // THE regression test for the "yellow guard is dismantled" bug. The mesh
+    // is ~24k separate pieces and ~1,900 of them straddle the rotor boundary.
+    // A per-triangle rule cuts each straddling piece in half, and the half
+    // that spins tears away from the half that stays. Whole-piece assignment
+    // makes that structurally impossible.
+    //
+    // The housing keeps the SOURCE vertex indices, so this can be checked
+    // directly against the real output buffers rather than by coordinates.
+    const srcPos = geo.getAttribute("position") as THREE.BufferAttribute;
+    const srcIdx = geo.getIndex()!;
+
+    const parent = new Int32Array(srcPos.count);
+    for (let i = 0; i < parent.length; i++) parent[i] = i;
+    const find = (x: number): number => {
+      let r = x;
+      while (parent[r] !== r) r = parent[r];
+      while (parent[x] !== r) {
+        const n = parent[x];
+        parent[x] = r;
+        x = n;
+      }
+      return r;
+    };
+    const union = (a: number, b: number) => {
+      const ra = find(a);
+      const rb = find(b);
+      if (ra !== rb) parent[ra] = rb;
+    };
+    for (let t = 0; t < srcIdx.count / 3; t++) {
+      union(srcIdx.getX(t * 3), srcIdx.getX(t * 3 + 1));
+      union(srcIdx.getX(t * 3 + 1), srcIdx.getX(t * 3 + 2));
+    }
+
+    const RX0 = -0.3;
+    const RX1 = -0.02;
+    const RR = 0.065;
+    const inRotor = (t: number) => {
+      let mnX = Infinity;
+      let mxX = -Infinity;
+      let mnY = Infinity;
+      for (let k = 0; k < 3; k++) {
+        const i = srcIdx.getX(t * 3 + k);
+        const x = srcPos.getX(i);
+        const y = srcPos.getY(i);
+        const z = srcPos.getZ(i);
+        mnX = Math.min(mnX, x);
+        mxX = Math.max(mxX, x);
+        mnY = Math.min(mnY, y);
+        if (Math.hypot(y, z) > RR) return false;
+      }
+      return mnY >= -0.05 && mnX >= RX0 && mxX <= RX1;
+    };
+
+    // For each source piece: total triangles, how many qualify, and how many
+    // ended up in the housing.
+    const total = new Int32Array(srcPos.count);
+    const qualifies = new Int32Array(srcPos.count);
+    const inHousing = new Int32Array(srcPos.count);
+    for (let t = 0; t < srcIdx.count / 3; t++) {
+      const root = find(srcIdx.getX(t * 3));
+      total[root]++;
+      if (inRotor(t)) qualifies[root]++;
+    }
+    const housingIdx = split.housing.getIndex()!;
+    for (let t = 0; t < housingIdx.count / 3; t++) {
+      inHousing[find(housingIdx.getX(t * 3))]++;
+    }
+
+    // The invariant: every piece lands ENTIRELY in the rotor or ENTIRELY in
+    // the housing. A piece only rotates if ALL of its triangles qualify, and
+    // a piece that qualifies only partly is kept whole and stationary.
+    let splitPieces = 0;
+    for (let i = 0; i < srcPos.count; i++) {
+      if (total[i] === 0) continue;
+      if (qualifies[i] === total[i]) {
+        // Wholly inside the bore: must be absent from the housing entirely.
+        if (inHousing[i] !== 0) splitPieces++;
+      } else {
+        // Straddles the boundary: must be present in the housing in FULL.
+        if (inHousing[i] !== total[i]) splitPieces++;
+      }
+    }
+    expect(splitPieces).toBe(0);
+
+    // Sanity: the model really does have straddling pieces, otherwise this
+    // test would pass vacuously.
+    expect(split.stats.straddlingPieces).toBeGreaterThan(100);
+    expect(split.stats.rotorPieces).toBeGreaterThan(100);
+  });
+
+
+  it("the model is many separate pieces, not one welded blob", () => {
+    // Guards the assumption the splitter depends on, and documents why
+    // per-triangle classification was always going to tear the model.
+    const srcPos = geo.getAttribute("position") as THREE.BufferAttribute;
+    const srcIdx = geo.getIndex()!;
+    const parent = new Int32Array(srcPos.count);
+    for (let i = 0; i < parent.length; i++) parent[i] = i;
+    const find = (x: number): number => {
+      let r = x;
+      while (parent[r] !== r) r = parent[r];
+      while (parent[x] !== r) {
+        const n = parent[x];
+        parent[x] = r;
+        x = n;
+      }
+      return r;
+    };
+    const union = (a: number, b: number) => {
+      const ra = find(a);
+      const rb = find(b);
+      if (ra !== rb) parent[ra] = rb;
+    };
+    for (let t = 0; t < srcIdx.count / 3; t++) {
+      union(srcIdx.getX(t * 3), srcIdx.getX(t * 3 + 1));
+      union(srcIdx.getX(t * 3 + 1), srcIdx.getX(t * 3 + 2));
+    }
+    const roots = new Set<number>();
+    for (let t = 0; t < srcIdx.count / 3; t++) roots.add(find(srcIdx.getX(t * 3)));
+    expect(roots.size).toBeGreaterThan(1000);
   });
 });

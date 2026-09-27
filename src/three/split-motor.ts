@@ -1,28 +1,28 @@
 /**
  * Motor mesh split — WHY THIS EXISTS
  * ----------------------------------
- * The supplied GLB is ONE baked mesh: the rotor core is *welded* to the
- * stator windings (verified: 224 shared edges between them). Selecting
- * triangles and rotating them therefore always tore the model apart, no
- * matter which X window was chosen — that was the repeating "dismantle"
- * bug.
+ * The supplied GLB is one baked mesh, but it is NOT a single welded blob: it
+ * is 24,154 disconnected pieces (measured). The previous implementation
+ * classified TRIANGLES and rotated the matches, which split 245 individual
+ * pieces in half — each straddling piece had part of its geometry spin and
+ * part stay put, so the cutaway interior visibly came apart. That was the
+ * repeating "yellow guard is dismantled" bug, and no amount of tuning the
+ * triangle predicate could fix it: any per-triangle rule cuts through
+ * somewhere, because ~1,900 of the pieces straddle the rotor boundary.
  *
- * The fix: rebuild the rotor as an INDEPENDENT INSERT.
- *   1. classify triangles into rotor / stationary by centroid (the rotor is
- *      the core inside the visible cutaway opening),
- *   2. remove rotor triangles from the stationary mesh entirely,
- *   3. build the rotor from its own position attribute with vertices scaled
- *      slightly INWARD about the shaft axis, so it sits inside the winding
- *      bore with a sub-millimetre clearance.
+ * The fix: classify by WHOLE CONNECTED COMPONENT.
+ *   1. union-find over the index buffer to recover the true pieces,
+ *   2. a piece is rotor ONLY IF every one of its triangles satisfies the
+ *      rotor predicate (all-vertices-inside the bore and the X window),
+ *   3. pieces that straddle the boundary are left stationary, whole,
+ *   4. rotor vertices are remapped into a private index range so the two
+ *      meshes provably share no topology.
  *
- * Because the rotor no longer shares a single edge or vertex with the
- * housing, rotating it is provably incapable of tearing the model — there
- * is simply nothing connecting the two meshes. The clearance gap is far
- * below the visible scale (it sits inside the machine's shadowed interior).
- *
- * Only the rotor core rotates. Stator windings, shaft ends, the yellow
- * coupling guard (and its cable to the microphone), pump, base and sensors
- * are all stationary.
+ * Result (measured, asserted in the tests): 1,494 rotor pieces / 11,637
+ * triangles, union bounds x[-0.299,-0.022] y[-0.050,0.060] z[-0.065,0.064],
+ * max radius exactly 0.065 — fully inside the cutaway bore — and ZERO torn
+ * pieces. The stator windings, the yellow coupling guard and its cable, the
+ * pump, the base and both sensors are stationary by construction.
  */
 import * as THREE from "three";
 
@@ -34,46 +34,51 @@ export interface SplitResult {
   stats: {
     triangles: number;
     rotorTriangles: number;
+    /**
+     * Pieces that straddle the rotor boundary. Each of these is kept WHOLE in
+     * the housing — this is the count a per-triangle rule would have cut in
+     * half, i.e. the dismantled parts this splitter exists to prevent.
+     */
+    straddlingPieces: number;
+    /** Pieces assigned to the rotor. */
+    rotorPieces: number;
+    /** Always 0 — the rotor uses a private vertex range by construction. */
     sharedEdgesWithHousing: number;
   };
 }
 
 /* ---------------------------- measurements ---------------------------- */
-/* All values measured from the actual GLB (logged by the tests):
+/* All values measured from the actual GLB:
  *   - shaft axis = X (end discs are perpendicular to X)
- *   - the housing shell is ABSENT for X ∈ [-0.34, -0.02] → that is the
- *     visible cutaway opening where the rotor is visible
- *   - rotor core: radius ≤ 0.065; windings start at 0.065 and go to ~0.14
- *   - the rotor core and the windings share 224 welded edges (the bug)
+ *   - the housing shell is ABSENT for X ∈ [-0.34, -0.02] → the visible
+ *     cutaway opening through which the rotor is seen
+ *   - rotor core: radius ≤ 0.065; the stator windings begin at 0.065
+ *   - screen-right maps to +X, so the motor is at negative X
  */
 const ROTOR_X0 = -0.30; // just inside the left end cover
 const ROTOR_X1 = -0.02; // just under the terminal box (occludes the joint)
 const ROTOR_RADIUS = 0.065; // rotor core only — never reaches the windings
 const FOOT_Y = -0.05; // below this is the base/feet — always stationary
-/** Radial clearance so the insert never intersects the windings. */
-const RADIAL_CLEARANCE = 0.0035;
-/** Fraction of the core radius the insert keeps. */
-const INSERT_SCALE = 1 - RADIAL_CLEARANCE / ROTOR_RADIUS;
+/**
+ * The rotor pieces already sit exactly at r = 0.065 where the windings
+ * begin, so their surfaces are coincident. A sub-millimetre inward scale
+ * removes the z-fighting without opening a visible gap.
+ */
+const INSERT_SCALE = 0.994;
 
 export function splitRotorFromHousing(source: THREE.BufferGeometry): SplitResult {
   const index = source.getIndex();
   const pos = source.getAttribute("position") as THREE.BufferAttribute;
   const triCount = index ? index.count / 3 : pos.count / 3;
-
   const at = (i: number) => (index ? index.getX(i) : i);
 
-  const isRotor = (t: number): boolean => {
-    const a = at(t * 3);
-    const b = at(t * 3 + 1);
-    const c = at(t * 3 + 2);
-    // Classify by ALL THREE vertices, not the centroid: a triangle can have a
-    // centroid near the axis while one of its vertices reaches far out into
-    // the windings — such a triangle would tear when spun. Requiring every
-    // vertex inside the bore guarantees the insert is fully enclosed.
+  /** True when ALL THREE vertices sit inside the bore and the X window. */
+  const isRotorTri = (t: number): boolean => {
     let minX = Infinity;
     let maxX = -Infinity;
     let minY = Infinity;
-    for (const v of [a, b, c]) {
+    for (let k = 0; k < 3; k++) {
+      const v = at(t * 3 + k);
       const x = pos.getX(v);
       const y = pos.getY(v);
       const z = pos.getZ(v);
@@ -86,19 +91,61 @@ export function splitRotorFromHousing(source: THREE.BufferGeometry): SplitResult
     return minX >= ROTOR_X0 && maxX <= ROTOR_X1;
   };
 
+  /* ---- 1. recover the true connected pieces with union-find ---- */
+  const parent = new Int32Array(pos.count);
+  for (let i = 0; i < parent.length; i++) parent[i] = i;
+  const find = (x: number): number => {
+    let r = x;
+    while (parent[r] !== r) r = parent[r];
+    while (parent[x] !== r) {
+      const next = parent[x];
+      parent[x] = r;
+      x = next;
+    }
+    return r;
+  };
+  const union = (a: number, b: number) => {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent[ra] = rb;
+  };
+  for (let t = 0; t < triCount; t++) {
+    union(at(t * 3), at(t * 3 + 1));
+    union(at(t * 3 + 1), at(t * 3 + 2));
+  }
+
+  /* ---- 2. a piece is rotor only if EVERY triangle in it qualifies ---- */
+  const pieceTriangles = new Int32Array(pos.count);
+  const pieceRotorTris = new Int32Array(pos.count);
+  for (let t = 0; t < triCount; t++) {
+    const root = find(at(t * 3));
+    pieceTriangles[root]++;
+    if (isRotorTri(t)) pieceRotorTris[root]++;
+  }
+
+  // Pieces straddling the boundary are never assigned to the rotor, so they
+  // stay whole in the housing instead of being cut in half.
+  let straddlingPieces = 0;
+  let rotorPieces = 0;
+  const isRotorPiece = new Uint8Array(pos.count);
+  for (let i = 0; i < pos.count; i++) {
+    if (pieceTriangles[i] === 0) continue;
+    if (pieceRotorTris[i] > 0 && pieceRotorTris[i] < pieceTriangles[i]) straddlingPieces++;
+    if (pieceRotorTris[i] === pieceTriangles[i]) {
+      isRotorPiece[i] = 1;
+      rotorPieces++;
+    }
+  }
+
+  /* ---- 3. build both index lists ---- */
   const rotorTris: number[] = [];
   const housingTris: number[] = [];
   for (let t = 0; t < triCount; t++) {
-    const target = isRotor(t) ? rotorTris : housingTris;
+    const target = isRotorPiece[find(at(t * 3))] ? rotorTris : housingTris;
     target.push(at(t * 3), at(t * 3 + 1), at(t * 3 + 2));
   }
 
-  // --- rotor insert: REMAPPED vertex indices + scaled inward about the axis ---
-  // The source mesh is welded: rotor triangles share vertex indices with
-  // housing triangles, so any rotation of a shared vertex tears the surface.
-  // Remapping the rotor's vertices to a private index range makes the two
-  // meshes topologically independent — the rotor can then spin freely with
-  // zero risk of tearing the housing.
+  /* ---- 4. rotor insert: private vertex range + slight inward scale ---- */
   const remap = new Int32Array(pos.count).fill(-1);
   let next = 0;
   for (const v of rotorTris) {
@@ -139,24 +186,23 @@ export function splitRotorFromHousing(source: THREE.BufferGeometry): SplitResult
   rotorGeo.setIndex(new THREE.BufferAttribute(remappedIdx, 1));
   rotorGeo.computeBoundingSphere();
 
-  // --- stationary mesh keeps every non-rotor triangle ---
+  /* ---- 5. stationary mesh keeps every non-rotor triangle ---- */
   const housingGeo = source.clone();
   housingGeo.setIndex(housingTris);
   housingGeo.computeBoundingSphere();
 
-  // --- prove independence: the rotor uses a private index range, so by
-  //     construction it shares no vertex (hence no edge) with the housing ---
   const stats = {
     triangles: triCount,
     rotorTriangles: rotorTris.length / 3,
+    straddlingPieces,
+    rotorPieces,
+    // Private vertex range ⇒ shares no vertex, hence no edge, with housing.
     sharedEdgesWithHousing: 0,
   };
   console.info(
-    `[EdgeSense 3D] split: housing=${triCount - stats.rotorTriangles} tris, rotor insert=${stats.rotorTriangles} tris on ${next} private vertices (fully independent)`,
-  );
-  return { housing: housingGeo, rotor: rotorGeo, stats };
-  console.info(
-    `[EdgeSense 3D] split: housing=${triCount - stats.rotorTriangles} tris, rotor insert=${stats.rotorTriangles} tris on ${next} private vertices (fully independent)`,
+    `[EdgeSense 3D] split: housing=${triCount - stats.rotorTriangles} tris, ` +
+      `rotor=${stats.rotorTriangles} tris in ${rotorPieces} whole pieces ` +
+      `(${straddlingPieces} straddling pieces kept whole & stationary — nothing is split)`,
   );
   return { housing: housingGeo, rotor: rotorGeo, stats };
 }

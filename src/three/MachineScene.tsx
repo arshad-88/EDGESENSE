@@ -76,7 +76,12 @@ async function loadMotor(): Promise<typeof cachedSplit> {
   const mat = m.material as THREE.MeshStandardMaterial;
   const mkMat = () => {
     const mm = mat.clone();
-    mm.side = THREE.DoubleSide;
+    // Single-sided on purpose. The GLB is a closed, correctly-wound solid:
+    // forcing DoubleSide made the back faces of the near wall draw through
+    // the front wall, which read as panels floating free of the body — the
+    // "yellow guard is coming apart" artifact. The cutaway interior is a
+    // genuine opening in the mesh, so it needs no back faces to look right.
+    mm.side = THREE.FrontSide;
     return mm;
   };
   const split = splitRotorFromHousing(m.geometry);
@@ -164,10 +169,13 @@ function Adxl345Effect({ stateRef, position, onSelect, selected }: SensorAnchorP
       if (!ring) continue;
       const phase = (t * (0.5 + intensity * 1.2) + i / RING_COUNT) % 1;
       ring.visible = on && intensity > 0.02;
-      const scale = 0.04 + phase * (0.10 + intensity * 0.22);
+      // Kept deliberately small: the machine is ~1.0 unit long, so a ring
+      // wider than ~0.1 reads as a detached halo sitting in front of the
+      // body rather than vibration emanating from the sensor.
+      const scale = 0.012 + phase * (0.022 + intensity * 0.05);
       ring.scale.setScalar(scale);
       const mat = ring.material as THREE.MeshBasicMaterial;
-      mat.opacity = on ? (1 - phase) * (0.25 + intensity * 0.6) : 0;
+      mat.opacity = on ? (1 - phase) * (0.18 + intensity * 0.4) : 0;
     }
     if (group.current) group.current.visible = on || selected;
   });
@@ -185,7 +193,7 @@ function Adxl345Effect({ stateRef, position, onSelect, selected }: SensorAnchorP
         position={[0, 0, 0]}
         onClick={(e) => { e.stopPropagation(); onSelect("ADXL345"); }}
       >
-        <sphereGeometry args={[0.07, 8, 8]} />
+        <sphereGeometry args={[0.045, 8, 8]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
       {Array.from({ length: RING_COUNT }, (_, i) => (
@@ -220,10 +228,10 @@ function Inmp441Effect({ stateRef, position, onSelect, selected }: SensorAnchorP
       const irregular = s && s.behaviour === "ANOMALY" ? 0.35 * Math.sin(t * 9 + i * 2.4) : 0;
       const phase = (t * (0.4 + intensity * 1.1) + i / RING_COUNT + irregular + 1) % 1;
       ring.visible = on && intensity > 0.02;
-      const scale = 0.03 + phase * (0.09 + intensity * 0.26);
+      const scale = 0.01 + phase * (0.02 + intensity * 0.055);
       ring.scale.setScalar(scale);
       const mat = ring.material as THREE.MeshBasicMaterial;
-      mat.opacity = on ? (1 - phase) * (0.2 + intensity * 0.55) : 0;
+      mat.opacity = on ? (1 - phase) * (0.16 + intensity * 0.4) : 0;
     }
     if (group.current) group.current.visible = on || selected;
   });
@@ -241,7 +249,7 @@ function Inmp441Effect({ stateRef, position, onSelect, selected }: SensorAnchorP
         position={[0, 0, 0]}
         onClick={(e) => { e.stopPropagation(); onSelect("INMP441"); }}
       >
-        <sphereGeometry args={[0.07, 8, 8]} />
+        <sphereGeometry args={[0.045, 8, 8]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
       {Array.from({ length: RING_COUNT }, (_, i) => (
