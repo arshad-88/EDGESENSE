@@ -14,8 +14,8 @@ export {
   SCENARIOS,
 } from "./simulator";
 export type { Scenario, ScenarioStep } from "./simulator";
+export type { SensorSource } from "./sensor-source";
 export {
-  SensorSource,
   SyntheticSourceAdapter,
   CSVSensorSource,
   ESP32SensorSource,
