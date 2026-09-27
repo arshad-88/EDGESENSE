@@ -56,7 +56,7 @@ export interface PipelineSnapshot {
   frames: PipelineFrame[];
   latest: PipelineFrame | null;
   heatmap: HeatmapRow[];
-  cloud: { baseline: CloudPoint[]; live: CloudPoint[] };
+  cloud: { baseline: CloudPoint[]; live: CloudPoint[]; trajectory: CloudPoint[] };
   fingerprint: {
     vibration: FingerprintBarLite[];
     acoustic: FingerprintBarLite[];
@@ -64,9 +64,13 @@ export interface PipelineSnapshot {
   needsBaseline: boolean;
 }
 
+/** Per-sensor, per-feature deviation row key ("ADXL345:rms"). */
+export type HeatmapCellKey = string;
+
 const HISTORY_LIMIT = 180; // ~3 minutes of 1s windows
-const CLOUD_BASELINE_LIMIT = 400;
+const CLOUD_BASELINE_LIMIT = 600;
 const CLOUD_LIVE_LIMIT = 120;
+const TRAJECTORY_LIMIT = 20;
 
 export class EdgeSensePipeline {
   private bundle: BaselineBundle | null = null;
@@ -147,7 +151,9 @@ export class EdgeSensePipeline {
 
     this.pushHistory(frame);
     this.pushCloud(vibOut.features, acOut.features, fusion);
-    this.pushHeatmap(vibOut.features, acOut.features, fusion);
+    const vibDev = computeDeviations(vibOut.features, this.bundle.metadata.stats.ADXL345);
+    const acDev = computeDeviations(acOut.features, this.bundle.metadata.stats.INMP441);
+    this.pushHeatmap(vibOut.features, acOut.features, vibDev, acDev, fusion);
 
     return frame;
   }
@@ -235,25 +241,22 @@ export class EdgeSensePipeline {
     this.cloudBaseline = points.slice(-CLOUD_BASELINE_LIMIT);
   }
 
-  private pushHeatmap(vib: FeatureVector, ac: FeatureVector, fusion: FusionResult): void {
-    const stats = this.bundle!.metadata.stats;
-    const deviations: Partial<Record<FeatureName, number>> = {};
-    for (const [features, sensor] of [
-      [vib, "ADXL345"],
-      [ac, "INMP441"],
-    ] as const) {
-      for (const f of FEATURE_VECTOR_ORDER) {
-        const baseline = stats[sensor][f].mean;
-        const dev =
-          baseline > 1e-9 ? (features.values[f] - baseline) / baseline : 0;
-        const key = `${sensor}:${f}` as FeatureName;
-        void key; // heatmap keys flattened below
-        deviations[f] = Math.max(Math.abs(deviations[f] ?? 0), Math.abs(dev)) * Math.sign(dev);
-      }
+  private pushHeatmap(
+    vib: FeatureVector,
+    ac: FeatureVector,
+    vibDev: Record<string, number>,
+    acDev: Record<string, number>,
+    fusion: FusionResult,
+  ): void {
+    // Per-sensor keys ("ADXL345:rms") so both modalities stay independent.
+    const deviations: Record<string, number> = {};
+    for (const f of FEATURE_VECTOR_ORDER) {
+      deviations[`ADXL345:${f}`] = vibDev[f] ?? 0;
+      deviations[`INMP441:${f}`] = acDev[f] ?? 0;
     }
     this.heatmap.push({
       timestamp: vib.timestamp,
-      deviations: deviations as Record<FeatureName, number>,
+      deviations,
       state: fusion.state,
     });
     while (this.heatmap.length > HISTORY_LIMIT) this.heatmap.shift();
@@ -265,7 +268,11 @@ export class EdgeSensePipeline {
       frames: this.frames,
       latest,
       heatmap: this.heatmap,
-      cloud: { baseline: this.cloudBaseline, live: this.cloudLive },
+      cloud: {
+        baseline: this.cloudBaseline,
+        live: this.cloudLive,
+        trajectory: this.cloudLive.slice(-TRAJECTORY_LIMIT),
+      },
       fingerprint: latest ? buildFingerprint(latest, this.bundle!.metadata) : { vibration: [], acoustic: [] },
       needsBaseline: !this.bundle,
     };
@@ -329,6 +336,18 @@ function toSpectrum(s: SpectrumResult): Spectrum {
     dominantFrequency: s.dominantFrequency,
     spectralEnergy: s.spectralEnergy,
   };
+}
+
+function computeDeviations(
+  features: FeatureVector,
+  stats: Record<FeatureName, { mean: number; std: number }>,
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const f of FEATURE_VECTOR_ORDER) {
+    const baseline = stats[f].mean;
+    out[f] = baseline > 1e-9 ? (features.values[f] - baseline) / baseline : 0;
+  }
+  return out;
 }
 
 function downsample(samples: readonly number[], target: number): number[] {

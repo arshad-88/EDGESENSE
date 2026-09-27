@@ -161,7 +161,13 @@ describe("synthetic simulator", () => {
 /* ------------------------ Isolation Forest ------------------------ */
 
 describe("Isolation Forest", () => {
-  const clusterA = () => [1 + Math.random() * 0.2, 2 + Math.random() * 0.2];
+  // Deterministic cluster (seeded LCG) so thresholds are stable.
+  let s = 12345;
+  const rand = () => {
+    s = (s * 1103515245 + 12345) % 2147483648;
+    return s / 2147483648;
+  };
+  const clusterA = () => [1 + rand() * 0.2, 2 + rand() * 0.2];
   const outlier = [8, 9];
 
   it("treats in-distribution samples as normal", () => {

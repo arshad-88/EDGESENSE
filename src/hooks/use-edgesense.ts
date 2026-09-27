@@ -23,8 +23,12 @@ import {
   serializeBaseline,
   deserializeBaseline,
   FEATURE_VECTOR_ORDER,
+  extractFeatures,
   SCENARIOS,
   type Scenario,
+  type CloudPoint,
+  fitPca,
+  projectPca,
 } from "@/core/edgesense";
 
 export type EngineStatus =
@@ -55,7 +59,7 @@ export interface EdgeSenseApi {
   retrain: () => void;
 }
 
-const TRAINING_WINDOWS = 60; // corpus size for baseline training
+const TRAINING_WINDOWS = 90; // corpus size for baseline training
 const NORMAL_RATE_MS = 1000; // real-time window cadence
 const REPLAY_RATE_MS = 350; // replay runs faster than real time
 
@@ -124,6 +128,25 @@ export function useEdgeSense(): EdgeSenseApi {
     setActiveScenario({ id: scenario.id, title: scenario.title, stepLabel: first.label });
   }, []);
 
+  /** Project training-corpus windows into the cloud baseline (dense envelope). */
+  const seedCloud = useCallback((corpus: Array<{ vibration: unknown; acoustic: unknown }>, bundle: { pca: Record<string, { mean: number[]; components: number[][] } | null> }) => {
+    const points: CloudPoint[] = [];
+    for (const pair of corpus) {
+      for (const [w, sensor] of [
+        [pair.vibration, "ADXL345"],
+        [pair.acoustic, "INMP441"],
+      ] as const) {
+        const pca = bundle.pca[sensor];
+        if (!pca) continue;
+        const { features } = extractFeatures(w as never);
+        const x = FEATURE_VECTOR_ORDER.map((f) => features.values[f]);
+        const { pc1, pc2 } = projectPca(pca as never, x);
+        points.push({ pc1, pc2, kind: "baseline", sensor: sensor as never, timestamp: features.timestamp, isAnomaly: false });
+      }
+    }
+    pipelineRef.current?.seedCloudBaseline(points);
+  }, []);
+
   const retrain = useCallback(() => {
     if (!sourceRef.current || !pipelineRef.current) return;
     const src = new SyntheticSourceAdapter(42, DEFAULT_SIMULATOR_CONFIG);
@@ -135,6 +158,7 @@ export function useEdgeSense(): EdgeSenseApi {
     try {
       const bundle = trainBaseline(corpus);
       pipelineRef.current.setBaseline(bundle);
+      seedCloud(corpus, bundle as never);
       setTrainedAt(bundle.metadata.trainedAt);
       setStatus("running");
       void saveModelRef.current({
@@ -179,6 +203,7 @@ export function useEdgeSense(): EdgeSenseApi {
         for (let i = 0; i < TRAINING_WINDOWS; i++) corpus.push(src.readWindow());
         const bundle = trainBaseline(corpus);
         pipeline.setBaseline(bundle);
+        seedCloud(corpus, bundle as never);
         setTrainedAt(bundle.metadata.trainedAt);
         void saveModelRef.current({
           trainedAt: bundle.metadata.trainedAt,

@@ -319,10 +319,13 @@ export const PcaModelSchema = z.object({
 });
 export type PcaModel = z.infer<typeof PcaModelSchema>;
 
-/** One row of the anomaly heatmap: per-feature normalised deviation. */
+/**
+ * One row of the anomaly heatmap. Keys are sensor-namespaced feature names
+ * ("ADXL345:rms", "INMP441:kurtosis") so both modalities stay independent.
+ */
 export const HeatmapRowSchema = z.object({
   timestamp: z.number(),
-  deviations: z.record(FeatureNameSchema, z.number()),
+  deviations: z.record(z.string(), z.number()),
   state: FusionStateSchema,
 });
 export type HeatmapRow = z.infer<typeof HeatmapRowSchema>;
