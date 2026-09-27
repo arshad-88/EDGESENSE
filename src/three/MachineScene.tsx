@@ -35,14 +35,16 @@ export const SENSOR_INFO: Record<SensorInfo["id"], SensorInfo> = {
     id: "ADXL345",
     name: "ADXL345",
     duty: "3-Axis Accelerometer · Vibration sensing",
-    measures: "Measures 3-axis vibration (RMS, kurtosis, peak) mounted on the motor housing.",
+    measures:
+      "The blue module bolted on top of the motor housing. Measures 3-axis vibration — RMS, variance, kurtosis, peak.",
     accent: "#38bdf8",
   },
   INMP441: {
     id: "INMP441",
     name: "INMP441",
     duty: "I2S MEMS Microphone · Acoustic sensing",
-    measures: "Measures acoustic emission near the coupling — audio level and spectrum.",
+    measures:
+      "The black microphone beside the coupling guard. Captures acoustic emission — audio level and spectrum.",
     accent: "#fb923c",
   },
 };
@@ -308,15 +310,23 @@ function MotorAssembly({
         these groups only emit sensing waves from those positions and provide
         the click targets; they never rotate.
       */}
+      {/*
+        Sensor effect anchors — measured from the real GLB components:
+          ADXL345 (blue accelerometer box) = component at ≈ (-0.41, 0.17, 0)
+            on top of the motor housing.
+          INMP441 (black mic ball) = component at ≈ (0.309, 0.171, -0.059),
+            mounted just right of the yellow guard.
+        Screen-right maps to +X, so the motor is at negative X.
+      */}
       <Adxl345Effect
         stateRef={stateRef}
-        position={[-0.28, 0.20, 0.04]}
+        position={[-0.41, 0.19, 0.0]}
         onSelect={onSelect}
         selected={selected === "ADXL345"}
       />
       <Inmp441Effect
         stateRef={stateRef}
-        position={[0.30, 0.10, 0.22]}
+        position={[0.309, 0.171, -0.059]}
         onSelect={onSelect}
         selected={selected === "INMP441"}
       />
