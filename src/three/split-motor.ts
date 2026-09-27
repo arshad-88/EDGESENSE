@@ -45,10 +45,13 @@ const FOOT_Y = -0.05;
 /** Rotor window (motor body cutaway). */
 const ROTOR_X0 = -0.16;
 const ROTOR_X1 = 0.02;
-/** Coupling drum window (between yellow guard and pump flange). */
-const COUPLING_X0 = 0.42;
+/** Coupling drum window. Measured layout (vertex-density + symmetry scan):
+ *  yellow guard = X 0.30–0.36 (tall, 15k tris, 75% symmetric),
+ *  coupling drum = X 0.46–0.50 (12.4k tris, all below y 0.13, **84% symmetric
+ *  at 90°** — strongly rotational), pump body beyond X 0.50. */
+const COUPLING_X0 = 0.46;
 const COUPLING_X1 = 0.50;
-const COUPLING_RADIUS = 0.15;
+const COUPLING_RADIUS = 0.14;
 
 export function splitRotorFromHousing(source: THREE.BufferGeometry): SplitResult {
   const index = source.getIndex();
