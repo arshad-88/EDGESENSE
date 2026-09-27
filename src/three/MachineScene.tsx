@@ -69,8 +69,17 @@ async function loadMotor(): Promise<typeof cachedSplit> {
   if (!mesh) throw new Error("No mesh found in motor GLB");
   const m = mesh as THREE.Mesh;
   const split = splitRotorFromHousing(m.geometry);
-  split.housing.userData.material = m.material;
-  split.rotor.userData.material = m.material;
+  // Both parts share the original textured material, but rendered
+  // double-sided: the rotor sits inside a cutaway, so when it rotates the
+  // camera can see the machine's interior — single-sided (default) materials
+  // make those interior faces invisible and the machine looks hollow/broken.
+  const mat = m.material as THREE.MeshStandardMaterial;
+  const housingMat = mat.clone();
+  housingMat.side = THREE.DoubleSide;
+  const rotorMat = mat.clone();
+  rotorMat.side = THREE.DoubleSide;
+  split.housing.userData.material = housingMat;
+  split.rotor.userData.material = rotorMat;
   cachedSplit = split;
   return split;
 }
