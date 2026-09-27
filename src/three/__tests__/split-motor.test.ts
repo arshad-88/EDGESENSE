@@ -11,34 +11,8 @@
  */
 import { describe, it, expect } from "vitest";
 import * as THREE from "three";
-import * as fs from "node:fs";
 import { splitRotorFromHousing } from "../split-motor";
-
-/** Parse the GLB binary directly (JSON chunk + binary chunk). */
-function loadGeometry(): THREE.BufferGeometry {
-  const buf = fs.readFileSync("public/motor.glb");
-  const jsonLen = buf.readUInt32LE(12);
-  const json = JSON.parse(buf.slice(20, 20 + jsonLen).toString());
-  const binStart = 20 + jsonLen + 8;
-  // NOTE: accessor.byteOffset is optional in glTF — omitting it means 0, not
-  // NaN. Reading it as `acc.byteOffset` directly silently produced a corrupt
-  // buffer here, which is how the "welded mesh" belief went unchallenged.
-  const read = (accessorIndex: number, Ctor: typeof Float32Array | typeof Uint32Array) => {
-    const acc = json.accessors[accessorIndex];
-    const view = json.bufferViews[acc.bufferView];
-    return new Ctor(
-      buf.buffer,
-      buf.byteOffset + binStart + view.byteOffset + (acc.byteOffset ?? 0),
-      acc.count * (Ctor === Float32Array ? 3 : 1),
-    );
-  };
-  const pos = read(1, Float32Array);
-  const idx = read(0, Uint32Array);
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-  geo.setIndex(new THREE.BufferAttribute(idx, 1));
-  return geo;
-}
+import { loadGeometry } from "./glb-fixture";
 
 /** Count triangles in `geo` whose centroid satisfies `pred`. */
 function countTris(

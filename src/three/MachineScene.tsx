@@ -19,6 +19,7 @@ import { OrbitControls, ContactShadows, Html } from "@react-three/drei";
 import * as THREE from "three";
 import type { MachineState } from "@/core/edgesense";
 import { splitRotorFromHousing } from "./split-motor";
+import { SENSOR_ANCHORS } from "./sensor-anchors";
 
 const GLB_URL = "/motor.glb";
 
@@ -195,9 +196,9 @@ function Adxl345Effect({ stateRef, position, onSelect, selected }: SensorAnchorP
         <sphereGeometry args={[0.016, 12, 12]} />
         <meshBasicMaterial color="#38bdf8" depthTest={false} />
       </mesh>
-      {/* Leader line + label. The two sensors project close together when the
-          camera looks down the machine axis, so their labels must sit on
-          OPPOSITE sides of their markers or one covers the other. */}
+      {/* Leader line + label. Both sensors sit in open air above the machine
+          and are at opposite ends of the skid, so both labels read above
+          their markers. */}
       <mesh position={[0, 0.03, 0]}>
         <boxGeometry args={[0.003, 0.06, 0.003]} />
         <meshBasicMaterial color="#38bdf8" depthTest={false} />
@@ -267,11 +268,11 @@ function Inmp441Effect({ stateRef, position, onSelect, selected }: SensorAnchorP
         <sphereGeometry args={[0.016, 12, 12]} />
         <meshBasicMaterial color="#fb923c" depthTest={false} />
       </mesh>
-      <mesh position={[0, -0.03, 0]}>
+      <mesh position={[0, 0.03, 0]}>
         <boxGeometry args={[0.003, 0.06, 0.003]} />
         <meshBasicMaterial color="#fb923c" depthTest={false} />
       </mesh>
-      <Html center distanceFactor={1.7} position={[0, -0.075, 0]} zIndexRange={[30, 10]}>
+      <Html center distanceFactor={1.7} position={[0, 0.075, 0]} zIndexRange={[30, 10]}>
         <span className="pointer-events-none select-none whitespace-nowrap rounded bg-background/90 px-1.5 py-0.5 text-[10px] font-bold tracking-widest text-orange-300 ring-1 ring-orange-400/60">
           INMP441
         </span>
@@ -361,13 +362,13 @@ function MotorAssembly({
       */}
       <Adxl345Effect
         stateRef={stateRef}
-        position={[-0.414, 0.168, 0.0]}
+        position={SENSOR_ANCHORS.ADXL345}
         onSelect={onSelect}
         selected={selected === "ADXL345"}
       />
       <Inmp441Effect
         stateRef={stateRef}
-        position={[0.281, 0.174, 0.032]}
+        position={SENSOR_ANCHORS.INMP441}
         onSelect={onSelect}
         selected={selected === "INMP441"}
       />
