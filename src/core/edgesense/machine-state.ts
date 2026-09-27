@@ -172,13 +172,21 @@ export class MachineStateEngine {
       ),
     );
 
-    // Live jitter so readouts never look frozen.
+    // Live jitter so readouts never look frozen (only while running).
     this.noiseT += 1;
     const j = (amp: number) =>
       Math.sin(this.noiseT * 0.7) * amp + Math.sin(this.noiseT * 1.9) * amp * 0.5;
-    s.vibrationRms = Math.max(0, s.vibrationRms * (1 + j(0.03)));
-    s.acousticLevel = Math.max(0, s.acousticLevel + j(0.6));
-    s.rpm = Math.max(0, s.rpm + j(running ? 6 : 0));
+    if (running) {
+      s.vibrationRms = Math.max(0, s.vibrationRms * (1 + j(0.03)));
+      s.acousticLevel = Math.max(0, s.acousticLevel + j(0.6));
+      s.rpm = Math.max(0, s.rpm + j(6));
+    }
+    // Snap fully to zero once stopped.
+    if (!running && s.rpm < 3) {
+      s.rpm = 0;
+      s.vibrationRms = 0;
+      s.acousticLevel = 0;
+    }
 
     s.machineStatus = !running
       ? "STANDBY"

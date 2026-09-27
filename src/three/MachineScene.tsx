@@ -12,12 +12,12 @@
 import { Suspense, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { OrbitControls, ContactShadows, Environment } from "@react-three/drei";
+import { OrbitControls, ContactShadows } from "@react-three/drei";
 import * as THREE from "three";
 import type { MachineState } from "@/core/edgesense";
 import { splitRotorFromHousing } from "./split-motor";
 
-const GLB_URL = "/sample_2026-09-27T131049.692.glb";
+const GLB_URL = "/motor.glb";
 
 /* ------------------------- GLB loading + split ------------------------- */
 
@@ -197,6 +197,7 @@ function MotorAssembly({ stateRef }: { stateRef: React.RefObject<MachineState> }
   }, []);
 
   if (error) {
+    console.error("[EdgeSense 3D] showing fallback geometry — GLB failed:", error);
     return (
       <group>
         <mesh position={[0, 0.3, 0]}>
@@ -240,7 +241,6 @@ export function MachineScene({ stateRef, className }: MachineSceneProps) {
         <Suspense fallback={null}>
           <MotorAssembly stateRef={stateRef} />
           <ContactShadows position={[0, -0.18, 0]} opacity={0.5} scale={4} blur={2.4} far={1} />
-          <Environment preset="warehouse" environmentIntensity={0.5} />
         </Suspense>
         <OrbitControls
           enablePan={false}
