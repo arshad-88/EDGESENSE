@@ -12,10 +12,12 @@
  *    (stationary), housing shell/base/pump beyond that
  *
  * Split rule (per triangle, using its centroid):
- *   ROTOR  = radius ≤ 0.06 above the base, X < guard window
- *     → shaft (drive section), rotor core, internal fan
- *   HOUSING = everything else (windings are part of the stator — stationary,
- *   as are the coupling, yellow guard, housing, pump and base).
+ *   ROTOR  = the exposed cutaway rotor core (X ∈ [-0.16, 0.06], r ≤ 0.11)
+ *     → exactly the part circled in the reference: rotor laminations + shaft
+ *     through the cutaway window.
+ *   HOUSING = everything else: stator windings (they are stationary — only
+ *   the rotor spins), shaft ends hidden inside end covers, coupling, yellow
+ *   guard (its cable runs to the microphone), housing, pump, base, sensors.
  *   This conservatively guarantees the guard, sensors and housing never spin.
  */
 import * as THREE from "three";
@@ -28,13 +30,14 @@ export interface SplitResult {
 }
 
 /** Shaft + rotor core cylinder radius (measured: windings start ≈ 0.065). */
-const ROTOR_RADIUS = 0.06;
+const ROTOR_RADIUS = 0.11;
 /** Bottom band (mounting feet / base) always stays stationary. */
 const FOOT_Y = -0.05;
-/** X beyond which the yellow coupling guard sits — its interior geometry is
- * hidden by the guard itself, so the shaft segment inside it never needs to
- * spin visually. Excluding it guarantees the guard never rotates. */
-const GUARD_X = 0.12;
+/** The exposed cutaway rotor window (between end cover and coupling guard).
+ * Everything outside this X range stays stationary — incl. the yellow guard
+ * (X > 0.12) so its cable to the microphone never disconnects. */
+const ROTOR_X0 = -0.16;
+const ROTOR_X1 = 0.06;
 
 export function splitRotorFromHousing(source: THREE.BufferGeometry): SplitResult {
   const index = source.getIndex();
@@ -52,7 +55,8 @@ export function splitRotorFromHousing(source: THREE.BufferGeometry): SplitResult
     const cz = (pos.getZ(a) + pos.getZ(b) + pos.getZ(c)) / 3;
     const r = Math.hypot(cy, cz);
 
-    const isRotor = cy >= FOOT_Y && r <= ROTOR_RADIUS && cx < GUARD_X;
+    const isRotor =
+      cy >= FOOT_Y && r <= ROTOR_RADIUS && cx >= ROTOR_X0 && cx <= ROTOR_X1;
     (isRotor ? rotor : housing).push(a, b, c);
   }
 

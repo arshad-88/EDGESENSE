@@ -1,10 +1,13 @@
 /**
- * FingerprintRadar — machine behaviour fingerprint as an overlapping polar
- * comparison. Baseline shape vs current shape, both built from real feature
- * values normalized against baseline std. Animated morph on behaviour change.
+ * FingerprintRadar — "behaviour bloom": a dual-ring polar fingerprint where
+ * each feature is a petal. The inner dashed ring is the learned baseline;
+ * petals extend outward/inward with signed deviation and carry a gradient
+ * that shifts hue as deviation grows. Vibration and acoustic petals are
+ * drawn as interleaved mirrored hemispheres so both modalities are visible
+ * at once and the overall bloom shape is instantly different between
+ * NORMAL / HEAVY LOAD / ANOMALY.
  */
 import { useMemo } from "react";
-import { useState } from "react";
 import { motion } from "framer-motion";
 import { FEATURE_LABELS } from "@/core/edgesense";
 import type { FeatureName, FingerprintBarLite } from "@/core/edgesense";
@@ -15,55 +18,77 @@ interface Props {
   acoustic: FingerprintBarLite[];
 }
 
-type SensorKey = "vibration" | "acoustic";
-
-const SIZE = 300;
+const SIZE = 320;
 const C = SIZE / 2;
-const RMAX = 108;
+const R_BASE = 62; // baseline ring radius
+const R_SPAN = 78; // max petal extension
 
-/** Normalized radius: 1.0 ring = baseline mean; beyond = deviation. */
-function shapeRadius(base: number, std: number, current: number): number {
-  if (std < 1e-9) return current > base ? 1.15 : 0.85;
-  const z = (current - base) / std; // standard deviations away
-  // Map [-3σ, +3σ] to [0.18, 1.82]; baseline sits exactly at 1.0.
-  return Math.max(0.15, Math.min(1.85, 1 + z / 3));
+interface Petal {
+  feature: string;
+  label: string;
+  angle: number; // radians
+  len: number; // signed px length (out = deviation up)
+  dev: number;
+  accent: string;
 }
 
-function polygonPoints(values: number[]): string {
-  const n = values.length;
-  return values
-    .map((v, i) => {
-      const a = (i / n) * Math.PI * 2 - Math.PI / 2;
-      return `${C + Math.cos(a) * v * RMAX},${C + Math.sin(a) * v * RMAX}`;
-    })
-    .join(" ");
+function buildPetals(
+  data: FingerprintBarLite[],
+  startAngle: number,
+  endAngle: number,
+  accent: string,
+): Petal[] {
+  const n = data.length || 1;
+  return data.map((d, i) => {
+    const t = n === 1 ? 0.5 : i / (n - 1);
+    const angle = startAngle + (endAngle - startAngle) * t;
+    const dev = Math.max(-0.9, Math.min(0.9, d.deviation));
+    return {
+      feature: d.feature,
+      label: FEATURE_LABELS[d.feature as FeatureName] ?? d.feature,
+      angle,
+      len: dev * R_SPAN,
+      dev,
+      accent,
+    };
+  });
+}
+
+function petalPath(p: Petal): string {
+  // A slim teardrop from the baseline ring outward (or inward).
+  const tipR = R_BASE + p.len;
+  const baseHalf = 0.055; // radians half-width at ring
+  const tipHalf = 0.016;
+  const x1a = C + Math.cos(p.angle - baseHalf) * (R_BASE - 4);
+  const y1a = C + Math.sin(p.angle - baseHalf) * (R_BASE - 4);
+  const x1b = C + Math.cos(p.angle + baseHalf) * (R_BASE - 4);
+  const y1b = C + Math.sin(p.angle + baseHalf) * (R_BASE - 4);
+  const tipX = C + Math.cos(p.angle) * tipR;
+  const tipY = C + Math.sin(p.angle) * tipR;
+  const x2a = C + Math.cos(p.angle + tipHalf) * tipR;
+  const y2a = C + Math.sin(p.angle + tipHalf) * tipR;
+  const x2b = C + Math.cos(p.angle - tipHalf) * tipR;
+  const y2b = C + Math.sin(p.angle - tipHalf) * tipR;
+  return `M ${x1a} ${y1a} L ${x1b} ${y1b} L ${x2a} ${y2a} L ${tipX} ${tipY} L ${x2b} ${y2b} Z`;
 }
 
 export function FingerprintRadar({ vibration, acoustic }: Props) {
-  const [sensor, setSensor] = useState<SensorKey>("vibration");
-  const data = sensor === "vibration" ? vibration : acoustic;
+  const petals = useMemo(() => {
+    const vib = buildPetals(vibration, Math.PI * 1.02, Math.PI * 1.98, "#38bdf8");
+    const ac = buildPetals(acoustic, Math.PI * 0.02, Math.PI * 0.98, "#fb923c");
+    return [...vib, ...ac];
+  }, [vibration, acoustic]);
 
-  const { baseShape, curShape, axes, deviating } = useMemo(() => {
-    const base = data.map((d) => 1);
-    const cur = data.map((d) => {
-      // std isn't in FingerprintBarLite; approximate σ from baseline and
-      // deviation — the pipeline provides deviation = (cur-base)/mean, and
-      // z ≈ deviation * mean / std. We re-derive σ from the baseline bundle
-      // at the call site instead; here fall back to mean-relative scaling.
-      return 1 + Math.max(-0.85, Math.min(0.85, d.deviation));
-    });
-    const dev = data.some((d) => Math.abs(d.deviation) > 0.18);
-    const axes = data.map((d, i) => {
-      const a = (i / data.length) * Math.PI * 2 - Math.PI / 2;
-      return {
-        label: FEATURE_LABELS[d.feature as FeatureName] ?? d.feature,
-        x: C + Math.cos(a) * (RMAX + 26),
-        y: C + Math.sin(a) * (RMAX + 26),
-        anchor: (Math.cos(a) > 0.3 ? "start" : Math.cos(a) < -0.3 ? "end" : "middle") as "start" | "end" | "middle",
-      };
-    });
-    return { baseShape: base, curShape: cur, axes, deviating: dev };
-  }, [data]);
+  const maxDev = useMemo(
+    () => Math.max(0, ...petals.map((p) => Math.abs(p.dev))),
+    [petals],
+  );
+  const deviating = maxDev > 0.18;
+  const sevColor = deviating
+    ? maxDev > 0.45
+      ? "var(--status-anomaly)"
+      : "var(--status-suspicious)"
+    : "var(--status-healthy)";
 
   return (
     <div className="flex h-full flex-col">
@@ -71,110 +96,107 @@ export function FingerprintRadar({ vibration, acoustic }: Props) {
         <div>
           <h3 className="text-sm font-semibold">Machine Behaviour Fingerprint</h3>
           <p className="text-[11px] text-muted-foreground">
-            Learned baseline vs current behaviour (radial, per feature)
+            Behaviour bloom — petals show signed deviation per feature, both sensors at once
           </p>
         </div>
-        <div className="flex gap-1">
-          {(["vibration", "acoustic"] as const).map((s) => (
-            <button
-              key={s}
-              onClick={() => setSensor(s)}
-              className={cn(
-                "rounded px-2 py-0.5 text-[10px] tracking-wide transition-colors",
-                sensor === s ? "bg-primary/20 text-primary" : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {s === "vibration" ? "Vibration" : "Acoustic"}
-            </button>
-          ))}
-        </div>
+        <span
+          className={cn(
+            "rounded border px-1.5 py-0.5 text-[9px] font-bold tracking-widest",
+            deviating ? "border-status-anomaly/50 text-status-anomaly" : "border-status-healthy/50 text-status-healthy",
+          )}
+        >
+          {deviating ? "DEVIATING" : "WITHIN BASELINE"}
+        </span>
       </div>
 
       <div className="relative min-h-0 flex-1">
-        <svg viewBox={`0 0 ${SIZE} ${SIZE}`} className="h-full w-full" role="img" aria-label="Behaviour fingerprint radar">
-          {/* grid rings: 0.5×, 1.0× (baseline), 1.5× */}
-          {[0.5, 1, 1.5].map((r) => (
-            <circle
-              key={r}
-              cx={C}
-              cy={C}
-              r={r * RMAX}
-              fill="none"
-              className="stroke-border"
-              strokeOpacity={r === 1 ? 0.55 : 0.25}
-              strokeDasharray={r === 1 ? "0" : "2 4"}
-            />
-          ))}
-          {/* axes */}
-          {axes.map((ax, i) => (
-            <line key={i} x1={C} y1={C} x2={C + (ax.x - C) * 0.78} y2={C + (ax.y - C) * 0.78} className="stroke-border" strokeOpacity={0.3} />
-          ))}
+        <svg viewBox={`0 0 ${SIZE} ${SIZE}`} className="h-full w-full" role="img" aria-label="Behaviour fingerprint bloom">
+          <defs>
+            <radialGradient id="bloomGlow" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stopColor={sevColor} stopOpacity={0.14} />
+              <stop offset="70%" stopColor={sevColor} stopOpacity={0.04} />
+              <stop offset="100%" stopColor="transparent" />
+            </radialGradient>
+          </defs>
 
-          {/* baseline shape (dashed, neutral) */}
-          <motion.polygon
-            points={polygonPoints(baseShape)}
-            fill="var(--muted-foreground)"
-            fillOpacity={0.1}
-            stroke="var(--muted-foreground)"
-            strokeOpacity={0.7}
-            strokeWidth={1.2}
-            strokeDasharray="5 3"
-            animate={{ points: polygonPoints(baseShape) }}
-            transition={{ duration: 0.6 }}
-          />
+          <circle cx={C} cy={C} r={R_BASE + R_SPAN + 14} fill="url(#bloomGlow)" />
 
-          {/* current shape (primary color / anomaly) */}
-          <motion.polygon
-            points={polygonPoints(curShape)}
-            fill={deviating ? "var(--status-anomaly)" : "var(--chart-1)"}
-            fillOpacity={0.16}
-            stroke={deviating ? "var(--status-anomaly)" : "var(--chart-1)"}
-            strokeWidth={1.8}
-            animate={{ points: polygonPoints(curShape) }}
-            transition={{ duration: 0.6, ease: "easeOut" }}
-          />
+          {/* reference rings */}
+          <circle cx={C} cy={C} r={R_BASE} fill="none" className="stroke-border" strokeOpacity={0.6} strokeDasharray="4 3" />
+          <circle cx={C} cy={C} r={R_BASE + R_SPAN} fill="none" className="stroke-border" strokeOpacity={0.22} />
+          <circle cx={C} cy={C} r={R_BASE - R_SPAN * 0.6} fill="none" className="stroke-border" strokeOpacity={0.18} />
 
-          {/* vertex dots on current shape */}
-          {curShape.map((r, i) => {
-            const a = (i / curShape.length) * Math.PI * 2 - Math.PI / 2;
+          {/* hemisphere separators */}
+          <line x1={C} y1={4} x2={C} y2={SIZE - 4} className="stroke-border" strokeOpacity={0.15} />
+
+          {/* petals */}
+          {petals.map((p, i) => {
+            const mag = Math.abs(p.dev);
+            // color blends from sensor accent to severity color with magnitude
+            const color = mag > 0.45 ? "#eb3723" : mag > 0.18 ? "#f0a13c" : p.accent;
+            return (
+              <motion.path
+                key={`${p.feature}-${i}`}
+                d={petalPath(p)}
+                fill={color}
+                fillOpacity={0.28 + mag * 0.5}
+                stroke={color}
+                strokeWidth={1}
+                initial={false}
+                animate={{ d: petalPath(p), fillOpacity: 0.28 + mag * 0.5 }}
+                transition={{ duration: 0.55, ease: "easeOut" }}
+              >
+                <title>
+                  {p.label}: {(p.dev * 100).toFixed(0)}% vs baseline
+                </title>
+              </motion.path>
+            );
+          })}
+
+          {/* tip dots */}
+          {petals.map((p, i) => {
+            const r = R_BASE + p.len;
             return (
               <motion.circle
-                key={i}
-                cx={C + Math.cos(a) * r * RMAX}
-                cy={C + Math.sin(a) * r * RMAX}
-                r={2.4}
-                fill={deviating ? "var(--status-anomaly)" : "var(--chart-1)"}
-                animate={{ cx: C + Math.cos(a) * r * RMAX, cy: C + Math.sin(a) * r * RMAX }}
-                transition={{ duration: 0.6 }}
+                key={`dot-${i}`}
+                cx={C + Math.cos(p.angle) * r}
+                cy={C + Math.sin(p.angle) * r}
+                r={2}
+                fill={Math.abs(p.dev) > 0.18 ? "#fff" : p.accent}
+                initial={false}
+                animate={{
+                  cx: C + Math.cos(p.angle) * r,
+                  cy: C + Math.sin(p.angle) * r,
+                }}
+                transition={{ duration: 0.55 }}
               />
             );
           })}
 
-          {/* labels */}
-          {axes.map((ax, i) => (
-            <text key={i} x={ax.x} y={ax.y} textAnchor={ax.anchor} dominantBaseline="middle" fontSize={9} className="fill-muted-foreground">
-              {ax.label}
-            </text>
-          ))}
+          {/* center readout */}
+          <text x={C} y={C - 6} textAnchor="middle" fontSize={11} fontWeight={700} fill={sevColor} fontFamily="ui-monospace, monospace">
+            {(maxDev * 100).toFixed(0)}%
+          </text>
+          <text x={C} y={C + 8} textAnchor="middle" fontSize={7.5} className="fill-muted-foreground" letterSpacing={1.5}>
+            MAX DEV
+          </text>
 
-          {/* center label */}
-          <text x={C} y={C - 4} textAnchor="middle" fontSize={8.5} className="fill-muted-foreground" fontFamily="ui-monospace, monospace">
-            BASELINE RING
+          {/* hemisphere labels */}
+          <text x={C} y={16} textAnchor="middle" fontSize={8.5} fill="#fb923c" letterSpacing={2}>
+            INMP441 · ACOUSTIC
+          </text>
+          <text x={C} y={SIZE - 8} textAnchor="middle" fontSize={8.5} fill="#38bdf8" letterSpacing={2}>
+            ADXL345 · VIBRATION
           </text>
         </svg>
       </div>
 
       <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-muted-foreground">
         <span className="flex items-center gap-1.5">
-          <span className="h-px w-4 border-t border-dashed border-muted-foreground" /> learned baseline
+          <span className="h-px w-4 border-t border-dashed border-muted-foreground" /> baseline ring
         </span>
-        <span className="flex items-center gap-1.5">
-          <span className={cn("h-px w-4", deviating ? "bg-status-anomaly" : "bg-chart-1")} /> current behaviour
-        </span>
-        <span>grid rings = 0.5× / 1.0× / 1.5× baseline</span>
+        <span>petal outward = above baseline · inward = below</span>
       </div>
     </div>
   );
 }
-
-
