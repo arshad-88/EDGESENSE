@@ -15,7 +15,7 @@
 import { Suspense, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { OrbitControls, ContactShadows } from "@react-three/drei";
+import { OrbitControls, ContactShadows, Html } from "@react-three/drei";
 import * as THREE from "three";
 import type { MachineState } from "@/core/edgesense";
 import { splitRotorFromHousing } from "./split-motor";
@@ -177,7 +177,6 @@ function Adxl345Effect({ stateRef, position, onSelect, selected }: SensorAnchorP
       const mat = ring.material as THREE.MeshBasicMaterial;
       mat.opacity = on ? (1 - phase) * (0.18 + intensity * 0.4) : 0;
     }
-    if (group.current) group.current.visible = on || selected;
   });
   return (
     <group
@@ -188,7 +187,20 @@ function Adxl345Effect({ stateRef, position, onSelect, selected }: SensorAnchorP
         onSelect("ADXL345");
       }}
     >
-      {/* invisible click target over the sensor location (no visual ball) */}
+      {/* Always-visible marker + label. These groups used to be hidden
+          entirely unless the motor was running, so a STANDBY machine showed
+          NO sensor markers and there was no way to tell which physical part
+          was which. Identification must not depend on the power state. */}
+      <mesh>
+        <sphereGeometry args={[0.012, 12, 12]} />
+        <meshBasicMaterial color="#38bdf8" depthTest={false} />
+      </mesh>
+      <Html center distanceFactor={1.7} position={[0, 0.05, 0]} zIndexRange={[20, 0]}>
+        <span className="pointer-events-none select-none whitespace-nowrap rounded bg-background/85 px-1.5 py-0.5 text-[9px] font-bold tracking-widest text-sky-300 ring-1 ring-sky-400/50">
+          ADXL345
+        </span>
+      </Html>
+      {/* invisible click target over the sensor location */}
       <mesh
         position={[0, 0, 0]}
         onClick={(e) => { e.stopPropagation(); onSelect("ADXL345"); }}
@@ -233,7 +245,6 @@ function Inmp441Effect({ stateRef, position, onSelect, selected }: SensorAnchorP
       const mat = ring.material as THREE.MeshBasicMaterial;
       mat.opacity = on ? (1 - phase) * (0.16 + intensity * 0.4) : 0;
     }
-    if (group.current) group.current.visible = on || selected;
   });
   return (
     <group
@@ -244,7 +255,17 @@ function Inmp441Effect({ stateRef, position, onSelect, selected }: SensorAnchorP
         onSelect("INMP441");
       }}
     >
-      {/* invisible click target over the sensor location (no visual ball) */}
+      {/* Always-visible marker + label — see the note on the ADXL345 group. */}
+      <mesh>
+        <sphereGeometry args={[0.012, 12, 12]} />
+        <meshBasicMaterial color="#fb923c" depthTest={false} />
+      </mesh>
+      <Html center distanceFactor={1.7} position={[0, 0.05, 0]} zIndexRange={[20, 0]}>
+        <span className="pointer-events-none select-none whitespace-nowrap rounded bg-background/85 px-1.5 py-0.5 text-[9px] font-bold tracking-widest text-orange-300 ring-1 ring-orange-400/50">
+          INMP441
+        </span>
+      </Html>
+      {/* invisible click target over the sensor location */}
       <mesh
         position={[0, 0, 0]}
         onClick={(e) => { e.stopPropagation(); onSelect("INMP441"); }}

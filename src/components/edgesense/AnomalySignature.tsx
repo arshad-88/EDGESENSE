@@ -64,6 +64,18 @@ function SpectralField({ keys, rows, start, label, group, hover, onHover }: Fiel
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    // The field is sized from clientWidth/clientHeight, so it must be redrawn
+    // when the element resizes — otherwise the canvas keeps its old backing
+    // size and the cells stretch or squash on window resize / layout change.
+    const ro = new ResizeObserver(() => draw());
+    ro.observe(canvas);
+    draw();
+    return () => ro.disconnect();
+  }, [visible, keys, hover, group]);
+
+  const draw = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
     const w = Math.max(1, visible.length);
     const h = keys.length;
     const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -152,7 +164,7 @@ function SpectralField({ keys, rows, start, label, group, hover, onHover }: Fiel
       ctx.stroke();
       ctx.globalAlpha = 1;
     }
-  }, [visible, keys, hover, group]);
+  };
 
   return (
     <div>
