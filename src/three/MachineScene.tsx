@@ -192,18 +192,25 @@ function Adxl345Effect({ stateRef, position, onSelect, selected }: SensorAnchorP
           entirely unless the motor was running, so a STANDBY machine showed
           NO sensor markers and there was no way to tell which physical part
           was which. Identification must not depend on the power state. */}
-      <mesh>
-        <sphereGeometry args={[0.016, 12, 12]} />
-        <meshBasicMaterial color="#38bdf8" depthTest={false} />
+      {/* A flat footprint ring rather than a sphere. A solid ball hovering
+          over the casting read as a loose object floating next to the machine
+          instead of a callout pointing at a part. */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.001, 0]}>
+        <ringGeometry args={[0.012, 0.018, 32]} />
+        <meshBasicMaterial
+          color="#38bdf8"
+          transparent
+          opacity={0.85}
+          side={THREE.DoubleSide}
+          depthTest={false}
+        />
       </mesh>
-      {/* Leader line + label. Both sensors sit in open air above the machine
-          and are at opposite ends of the skid, so both labels read above
-          their markers. */}
-      <mesh position={[0, 0.03, 0]}>
-        <boxGeometry args={[0.003, 0.06, 0.003]} />
-        <meshBasicMaterial color="#38bdf8" depthTest={false} />
+      {/* Leader line tying the label to the part it names. */}
+      <mesh position={[0, 0.038, 0]}>
+        <boxGeometry args={[0.0022, 0.076, 0.0022]} />
+        <meshBasicMaterial color="#38bdf8" transparent opacity={0.8} depthTest={false} />
       </mesh>
-      <Html center distanceFactor={1.7} position={[0, 0.075, 0]} zIndexRange={[30, 10]}>
+      <Html center distanceFactor={1.7} position={[0, 0.086, 0]} zIndexRange={[30, 10]}>
         <span className="pointer-events-none select-none whitespace-nowrap rounded bg-background/90 px-1.5 py-0.5 text-[10px] font-bold tracking-widest text-sky-300 ring-1 ring-sky-400/60">
           ADXL345
         </span>
@@ -264,15 +271,21 @@ function Inmp441Effect({ stateRef, position, onSelect, selected }: SensorAnchorP
       }}
     >
       {/* Always-visible marker + label — see the note on the ADXL345 group. */}
-      <mesh>
-        <sphereGeometry args={[0.016, 12, 12]} />
-        <meshBasicMaterial color="#fb923c" depthTest={false} />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.001, 0]}>
+        <ringGeometry args={[0.012, 0.018, 32]} />
+        <meshBasicMaterial
+          color="#fb923c"
+          transparent
+          opacity={0.85}
+          side={THREE.DoubleSide}
+          depthTest={false}
+        />
       </mesh>
-      <mesh position={[0, 0.03, 0]}>
-        <boxGeometry args={[0.003, 0.06, 0.003]} />
-        <meshBasicMaterial color="#fb923c" depthTest={false} />
+      <mesh position={[0, 0.038, 0]}>
+        <boxGeometry args={[0.0022, 0.076, 0.0022]} />
+        <meshBasicMaterial color="#fb923c" transparent opacity={0.8} depthTest={false} />
       </mesh>
-      <Html center distanceFactor={1.7} position={[0, 0.075, 0]} zIndexRange={[30, 10]}>
+      <Html center distanceFactor={1.7} position={[0, 0.086, 0]} zIndexRange={[30, 10]}>
         <span className="pointer-events-none select-none whitespace-nowrap rounded bg-background/90 px-1.5 py-0.5 text-[10px] font-bold tracking-widest text-orange-300 ring-1 ring-orange-400/60">
           INMP441
         </span>
@@ -352,13 +365,17 @@ function MotorAssembly({
         the click targets; they never rotate.
       */}
       {/*
-        Sensor effect anchors — located by measuring the real GLB components
-        (isolated, near-spherical parts only, so bolts and flanges are excluded):
-          ADXL345 = the BLUE BOX on top of the motor housing, a flat plate
-            component centred at ≈ (-0.414, 0.162, 0). Negative X = screen left.
-          INMP441 = the small BLACK SPHERICAL mic on its stem, the most
-            spherical isolated part in the pump zone, at ≈ (0.281, 0.170, 0.032).
-            This is NOT the bolted flange further along the pump (x ≈ 0.47).
+        Sensor effect anchors. Both values are measured from the real GLB by
+        decomposing it into connected components — see sensor-anchors.ts and
+        the assertions in __tests__/sensor-anchors.test.ts.
+
+          ADXL345 — the accelerometer position on top of the motor housing at
+            the drive end (negative X). The motor's top deck there reaches
+            y = 0.179, so the marker sits at y = 0.186, clear of the casting.
+          INMP441 — the microphone: a ~15 mm spherical head at
+            (0.131, 0.225, 0.086) carried on a thin 8 x 63 mm vertical post,
+            standing above the deck between the motor and the coupling guard.
+            It is emphatically NOT the bolted flange further along the pump.
       */}
       <Adxl345Effect
         stateRef={stateRef}
