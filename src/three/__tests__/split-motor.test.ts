@@ -83,7 +83,7 @@ describe("motor splitter invariants (real GLB)", () => {
   const split = splitRotorFromHousing(geo);
 
   it("rotor uses a PRIVATE vertex range — cannot share topology", () => {
-    expect(split.stats.rotorTriangles).toBeGreaterThan(2000);
+    expect(split.stats.rotorTriangles).toBeGreaterThan(200);
     const rotorPos = split.rotor.getAttribute("position") as THREE.BufferAttribute;
     const rotorIdx = split.rotor.getIndex()!;
     let maxIndex = 0;
@@ -93,6 +93,114 @@ describe("motor splitter invariants (real GLB)", () => {
     // with the housing structurally impossible.
     expect(maxIndex).toBeLessThan(rotorPos.count);
     expect(rotorPos.count).toBeLessThan(60000);
+  });
+
+  it("rotor CANNOT clip stationary geometry while spinning", () => {
+    // The artifact that made the rotor look like it was growing out of the
+    // machine: 478 stationary pieces reach INTO the bore (innermost measured
+    // r = 0.0059). A full-radius rotor therefore scraped straight through
+    // them as it turned. The splitter keeps only pieces strictly inside the
+    // stationary envelope at every x-slice.
+    //
+    // This checks the ACTUAL rotor geometry against a purely geometric
+    // envelope (derived from the source mesh alone), so it verifies the
+    // shipped output rather than re-deriving the implementation.
+    const srcPos = geo.getAttribute("position") as THREE.BufferAttribute;
+    const srcIdx = geo.getIndex()!;
+    const RX0 = -0.3;
+    const RX1 = -0.02;
+    const RR = 0.065;
+    const FY = -0.05;
+    const SLICE = 0.002;
+    const N = Math.ceil((RX1 - RX0) / SLICE) + 1;
+    const sliceOf = (x: number) =>
+      Math.min(N - 1, Math.max(0, Math.floor((x - RX0) / SLICE)));
+
+    // A source triangle "belongs to a bore piece" when all three of its
+    // vertices are inside the bore and the X window.
+    const boreTri = (t: number) => {
+      let mnX = Infinity;
+      let mxX = -Infinity;
+      let mnY = Infinity;
+      for (let k = 0; k < 3; k++) {
+        const i = srcIdx.getX(t * 3 + k);
+        const x = srcPos.getX(i);
+        const y = srcPos.getY(i);
+        const z = srcPos.getZ(i);
+        mnX = Math.min(mnX, x);
+        mxX = Math.max(mxX, x);
+        mnY = Math.min(mnY, y);
+        if (Math.hypot(y, z) > RR) return false;
+      }
+      return mnY >= FY && mnX >= RX0 && mxX <= RX1;
+    };
+
+    // Innermost stationary radius per slice, over vertices that do NOT belong
+    // to a wholly-bore piece. Computed in one pass via union-find.
+    const parent = new Int32Array(srcPos.count);
+    for (let i = 0; i < parent.length; i++) parent[i] = i;
+    const find = (x: number): number => {
+      let r = x;
+      while (parent[r] !== r) r = parent[r];
+      while (parent[x] !== r) {
+        const n = parent[x];
+        parent[x] = r;
+        x = n;
+      }
+      return r;
+    };
+    const union = (a: number, b: number) => {
+      const ra = find(a);
+      const rb = find(b);
+      if (ra !== rb) parent[ra] = rb;
+    };
+    for (let t = 0; t < srcIdx.count / 3; t++) {
+      union(srcIdx.getX(t * 3), srcIdx.getX(t * 3 + 1));
+      union(srcIdx.getX(t * 3 + 1), srcIdx.getX(t * 3 + 2));
+    }
+    const pieceTotals = new Int32Array(srcPos.count);
+    const pieceBore = new Int32Array(srcPos.count);
+    for (let t = 0; t < srcIdx.count / 3; t++) {
+      const r = find(srcIdx.getX(t * 3));
+      pieceTotals[r]++;
+      if (boreTri(t)) pieceBore[r]++;
+    }
+    const isBorePiece = (root: number) => pieceTotals[root] > 0 && pieceBore[root] === pieceTotals[root];
+
+    const stationaryMin = new Float64Array(N).fill(Infinity);
+    for (let v = 0; v < srcPos.count; v++) {
+      if (isBorePiece(find(v))) continue;
+      const x = srcPos.getX(v);
+      if (x < RX0 || x > RX1) continue;
+      if (srcPos.getY(v) < FY) continue;
+      const r = Math.hypot(srcPos.getY(v), srcPos.getZ(v));
+      const s = sliceOf(x);
+      if (r < stationaryMin[s]) stationaryMin[s] = r;
+    }
+
+    // Every vertex of the shipped rotor must sit strictly inside that
+    // envelope (undo the inward scale before comparing).
+    const S = 0.994;
+    const rotorPos = split.rotor.getAttribute("position") as THREE.BufferAttribute;
+    const rotorIdx = split.rotor.getIndex()!;
+    let outside = 0;
+    for (let t = 0; t < rotorIdx.count / 3; t++) {
+      for (let k = 0; k < 3; k++) {
+        const i = rotorIdx.getX(t * 3 + k);
+        const x = rotorPos.getX(i);
+        if (x < RX0 - 1e-6 || x > RX1 + 1e-6) {
+          outside++;
+          continue;
+        }
+        const limit = stationaryMin[sliceOf(x)];
+        const r = Math.hypot(rotorPos.getY(i), rotorPos.getZ(i));
+        if (limit !== Infinity && r / S >= limit - 1e-9) outside++;
+      }
+    }
+    expect(outside).toBe(0);
+
+    // Sanity: the envelope is genuinely restrictive, so this is not vacuous.
+    expect(split.stats.clippingPieces).toBeGreaterThan(0);
   });
 
   it("rotor insert is enclosed: no triangle shares an edge with the housing", () => {
@@ -165,16 +273,15 @@ describe("motor splitter invariants (real GLB)", () => {
 
   it("NO piece of the model is ever split between rotor and housing", () => {
     // THE regression test for the "yellow guard is dismantled" bug. The mesh
-    // is ~24k separate pieces and ~1,900 of them straddle the rotor boundary.
-    // A per-triangle rule cuts each straddling piece in half, and the half
-    // that spins tears away from the half that stays. Whole-piece assignment
-    // makes that structurally impossible.
+    // is ~24k separate pieces and ~1,900 straddle the rotor boundary. A
+    // per-triangle rule cuts each straddling piece in half and the half that
+    // spins tears away from the half that stays.
     //
-    // The housing keeps the SOURCE vertex indices, so this can be checked
-    // directly against the real output buffers rather than by coordinates.
+    // The invariant, checked directly on the output: the housing must contain
+    // either ALL of a source piece's triangles or NONE of them. A partial
+    // count means the piece was cut.
     const srcPos = geo.getAttribute("position") as THREE.BufferAttribute;
     const srcIdx = geo.getIndex()!;
-
     const parent = new Int32Array(srcPos.count);
     for (let i = 0; i < parent.length; i++) parent[i] = i;
     const find = (x: number): number => {
@@ -196,55 +303,16 @@ describe("motor splitter invariants (real GLB)", () => {
       union(srcIdx.getX(t * 3), srcIdx.getX(t * 3 + 1));
       union(srcIdx.getX(t * 3 + 1), srcIdx.getX(t * 3 + 2));
     }
-
-    const RX0 = -0.3;
-    const RX1 = -0.02;
-    const RR = 0.065;
-    const inRotor = (t: number) => {
-      let mnX = Infinity;
-      let mxX = -Infinity;
-      let mnY = Infinity;
-      for (let k = 0; k < 3; k++) {
-        const i = srcIdx.getX(t * 3 + k);
-        const x = srcPos.getX(i);
-        const y = srcPos.getY(i);
-        const z = srcPos.getZ(i);
-        mnX = Math.min(mnX, x);
-        mxX = Math.max(mxX, x);
-        mnY = Math.min(mnY, y);
-        if (Math.hypot(y, z) > RR) return false;
-      }
-      return mnY >= -0.05 && mnX >= RX0 && mxX <= RX1;
-    };
-
-    // For each source piece: total triangles, how many qualify, and how many
-    // ended up in the housing.
     const total = new Int32Array(srcPos.count);
-    const qualifies = new Int32Array(srcPos.count);
+    for (let t = 0; t < srcIdx.count / 3; t++) total[find(srcIdx.getX(t * 3))]++;
     const inHousing = new Int32Array(srcPos.count);
-    for (let t = 0; t < srcIdx.count / 3; t++) {
-      const root = find(srcIdx.getX(t * 3));
-      total[root]++;
-      if (inRotor(t)) qualifies[root]++;
-    }
     const housingIdx = split.housing.getIndex()!;
-    for (let t = 0; t < housingIdx.count / 3; t++) {
-      inHousing[find(housingIdx.getX(t * 3))]++;
-    }
+    for (let t = 0; t < housingIdx.count / 3; t++) inHousing[find(housingIdx.getX(t * 3))]++;
 
-    // The invariant: every piece lands ENTIRELY in the rotor or ENTIRELY in
-    // the housing. A piece only rotates if ALL of its triangles qualify, and
-    // a piece that qualifies only partly is kept whole and stationary.
     let splitPieces = 0;
     for (let i = 0; i < srcPos.count; i++) {
       if (total[i] === 0) continue;
-      if (qualifies[i] === total[i]) {
-        // Wholly inside the bore: must be absent from the housing entirely.
-        if (inHousing[i] !== 0) splitPieces++;
-      } else {
-        // Straddles the boundary: must be present in the housing in FULL.
-        if (inHousing[i] !== total[i]) splitPieces++;
-      }
+      if (inHousing[i] !== 0 && inHousing[i] !== total[i]) splitPieces++;
     }
     expect(splitPieces).toBe(0);
 
@@ -253,7 +321,6 @@ describe("motor splitter invariants (real GLB)", () => {
     expect(split.stats.straddlingPieces).toBeGreaterThan(100);
     expect(split.stats.rotorPieces).toBeGreaterThan(100);
   });
-
 
   it("the model is many separate pieces, not one welded blob", () => {
     // Guards the assumption the splitter depends on, and documents why

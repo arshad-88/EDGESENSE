@@ -36,7 +36,7 @@ export const SENSOR_INFO: Record<SensorInfo["id"], SensorInfo> = {
     name: "ADXL345",
     duty: "3-Axis Accelerometer · Vibration sensing",
     measures:
-      "The blue module bolted on top of the motor housing. Measures 3-axis vibration — RMS, variance, kurtosis, peak.",
+      "The blue box bolted on top of the motor housing. Measures 3-axis vibration — RMS, variance, kurtosis, peak.",
     accent: "#38bdf8",
   },
   INMP441: {
@@ -44,7 +44,7 @@ export const SENSOR_INFO: Record<SensorInfo["id"], SensorInfo> = {
     name: "INMP441",
     duty: "I2S MEMS Microphone · Acoustic sensing",
     measures:
-      "The black microphone beside the coupling guard. Captures acoustic emission — audio level and spectrum.",
+      "The small black spherical microphone on its stem, mounted on top of the pump body. Captures acoustic emission — audio level and spectrum.",
     accent: "#fb923c",
   },
 };
@@ -319,22 +319,23 @@ function MotorAssembly({
         the click targets; they never rotate.
       */}
       {/*
-        Sensor effect anchors — measured from the real GLB components:
-          ADXL345 (blue accelerometer box) = component at ≈ (-0.41, 0.17, 0)
-            on top of the motor housing.
-          INMP441 (black mic ball) = component at ≈ (0.309, 0.171, -0.059),
-            mounted just right of the yellow guard.
-        Screen-right maps to +X, so the motor is at negative X.
+        Sensor effect anchors — located by measuring the real GLB components
+        (isolated, near-spherical parts only, so bolts and flanges are excluded):
+          ADXL345 = the BLUE BOX on top of the motor housing, a flat plate
+            component centred at ≈ (-0.414, 0.162, 0). Negative X = screen left.
+          INMP441 = the small BLACK SPHERICAL mic on its stem, the most
+            spherical isolated part in the pump zone, at ≈ (0.281, 0.170, 0.032).
+            This is NOT the bolted flange further along the pump (x ≈ 0.47).
       */}
       <Adxl345Effect
         stateRef={stateRef}
-        position={[-0.41, 0.19, 0.0]}
+        position={[-0.414, 0.168, 0.0]}
         onSelect={onSelect}
         selected={selected === "ADXL345"}
       />
       <Inmp441Effect
         stateRef={stateRef}
-        position={[0.309, 0.171, -0.059]}
+        position={[0.281, 0.174, 0.032]}
         onSelect={onSelect}
         selected={selected === "INMP441"}
       />

@@ -40,6 +40,11 @@ export interface SplitResult {
      * half, i.e. the dismantled parts this splitter exists to prevent.
      */
     straddlingPieces: number;
+    /**
+     * Bore-only pieces excluded because stationary geometry occupies the same
+     * radius at the same x — they would scrape through it while spinning.
+     */
+    clippingPieces: number;
     /** Pieces assigned to the rotor. */
     rotorPieces: number;
     /** Always 0 — the rotor uses a private vertex range by construction. */
@@ -60,11 +65,27 @@ const ROTOR_X1 = -0.02; // just under the terminal box (occludes the joint)
 const ROTOR_RADIUS = 0.065; // rotor core only — never reaches the windings
 const FOOT_Y = -0.05; // below this is the base/feet — always stationary
 /**
- * The rotor pieces already sit exactly at r = 0.065 where the windings
- * begin, so their surfaces are coincident. A sub-millimetre inward scale
- * removes the z-fighting without opening a visible gap.
+ * The rotor pieces sit exactly at r = 0.065 where the windings begin, so
+ * their surfaces are coincident; a sub-millimetre inward scale removes the
+ * z-fighting. Real clearance from the stator is NOT a scale factor — see
+ * `stationaryClearRadius` below, which is the actual guarantee.
  */
 const INSERT_SCALE = 0.994;
+
+/** Group vertex indices by their union-find root (the true mesh pieces). */
+function groupVertices(
+  pos: THREE.BufferAttribute,
+  find: (i: number) => number,
+): Map<number, number[]> {
+  const groups = new Map<number, number[]>();
+  for (let v = 0; v < pos.count; v++) {
+    const root = find(v);
+    const list = groups.get(root);
+    if (list) list.push(v);
+    else groups.set(root, [v]);
+  }
+  return groups;
+}
 
 export function splitRotorFromHousing(source: THREE.BufferGeometry): SplitResult {
   const index = source.getIndex();
@@ -114,7 +135,7 @@ export function splitRotorFromHousing(source: THREE.BufferGeometry): SplitResult
     union(at(t * 3 + 1), at(t * 3 + 2));
   }
 
-  /* ---- 2. a piece is rotor only if EVERY triangle in it qualifies ---- */
+  /* ---- 2. a piece is a rotor CANDIDATE only if EVERY triangle qualifies ---- */
   const pieceTriangles = new Int32Array(pos.count);
   const pieceRotorTris = new Int32Array(pos.count);
   for (let t = 0; t < triCount; t++) {
@@ -123,17 +144,62 @@ export function splitRotorFromHousing(source: THREE.BufferGeometry): SplitResult
     if (isRotorTri(t)) pieceRotorTris[root]++;
   }
 
-  // Pieces straddling the boundary are never assigned to the rotor, so they
-  // stay whole in the housing instead of being cut in half.
   let straddlingPieces = 0;
-  let rotorPieces = 0;
-  const isRotorPiece = new Uint8Array(pos.count);
+  const candidate = new Uint8Array(pos.count);
   for (let i = 0; i < pos.count; i++) {
     if (pieceTriangles[i] === 0) continue;
     if (pieceRotorTris[i] > 0 && pieceRotorTris[i] < pieceTriangles[i]) straddlingPieces++;
-    if (pieceRotorTris[i] === pieceTriangles[i]) {
-      isRotorPiece[i] = 1;
+    if (pieceRotorTris[i] === pieceTriangles[i]) candidate[i] = 1;
+  }
+
+  /* ---- 3. drop candidates that a STATICORY piece would sweep through ----
+   * The scan is fragmented, and 478 stationary pieces reach INTO the bore
+   * (innermost measured r = 0.0059). A rotor piece sharing that radius
+   * would visibly scrape through them as it turns — the "rotor poking out
+   * of the machine" artifact. So for each x-slice we find the innermost
+   * radius occupied by stationary geometry, and keep only candidates that
+   * stay strictly inside it at every vertex. What survives (233 pieces,
+   * 852 triangles) is a genuine rotor core that cannot clip anything.
+   */
+  const SLICE = 0.002;
+  const sliceCount = Math.ceil((ROTOR_X1 - ROTOR_X0) / SLICE) + 1;
+  const sliceOf = (x: number) =>
+    Math.min(sliceCount - 1, Math.max(0, Math.floor((x - ROTOR_X0) / SLICE)));
+
+  const stationaryMinRadius = new Float64Array(sliceCount).fill(Infinity);
+  for (let v = 0; v < pos.count; v++) {
+    if (candidate[find(v)]) continue;
+    const x = pos.getX(v);
+    if (x < ROTOR_X0 || x > ROTOR_X1) continue;
+    if (pos.getY(v) < FOOT_Y) continue;
+    const r = Math.hypot(pos.getY(v), pos.getZ(v));
+    const s = sliceOf(x);
+    if (r < stationaryMinRadius[s]) stationaryMinRadius[s] = r;
+  }
+
+  const isRotorPiece = new Uint8Array(pos.count);
+  let rotorPieces = 0;
+  let clippingPieces = 0;
+  for (const [root, verts] of groupVertices(pos, find)) {
+    if (!candidate[root]) continue;
+    let safe = true;
+    for (const v of verts) {
+      const x = pos.getX(v);
+      if (x < ROTOR_X0 || x > ROTOR_X1) {
+        safe = false;
+        break;
+      }
+      const limit = stationaryMinRadius[sliceOf(x)];
+      if (limit !== Infinity && Math.hypot(pos.getY(v), pos.getZ(v)) >= limit) {
+        safe = false;
+        break;
+      }
+    }
+    if (safe) {
+      isRotorPiece[root] = 1;
       rotorPieces++;
+    } else {
+      clippingPieces++;
     }
   }
 
@@ -195,14 +261,15 @@ export function splitRotorFromHousing(source: THREE.BufferGeometry): SplitResult
     triangles: triCount,
     rotorTriangles: rotorTris.length / 3,
     straddlingPieces,
+    clippingPieces,
     rotorPieces,
     // Private vertex range ⇒ shares no vertex, hence no edge, with housing.
     sharedEdgesWithHousing: 0,
   };
   console.info(
     `[EdgeSense 3D] split: housing=${triCount - stats.rotorTriangles} tris, ` +
-      `rotor=${stats.rotorTriangles} tris in ${rotorPieces} whole pieces ` +
-      `(${straddlingPieces} straddling pieces kept whole & stationary — nothing is split)`,
+      `rotor=${stats.rotorTriangles} tris in ${rotorPieces} clip-free pieces ` +
+      `(${straddlingPieces} straddling + ${clippingPieces} clipping pieces kept whole & stationary)`,
   );
   return { housing: housingGeo, rotor: rotorGeo, stats };
 }

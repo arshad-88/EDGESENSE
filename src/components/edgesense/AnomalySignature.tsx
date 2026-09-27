@@ -68,7 +68,7 @@ function SpectralField({ keys, rows, start, label, group, hover, onHover }: Fiel
     const h = keys.length;
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     const cssW = canvas.clientWidth || 600;
-    const cssH = canvas.clientHeight || 110;
+    const cssH = canvas.clientHeight || 132;
     canvas.width = Math.round(cssW * dpr);
     canvas.height = Math.round(cssH * dpr);
     const ctx = canvas.getContext("2d");
@@ -98,57 +98,57 @@ function SpectralField({ keys, rows, start, label, group, hover, onHover }: Fiel
     }
     octx.putImageData(img, 0, 0);
 
-    // Draw: temporarily disable smoothing horizontally? Canvas can't do
-    // per-axis smoothing, so draw at exact 1:1 column mapping via slicing:
-    // crisp columns — draw each column as its own vertical slice.
+    // CRISP draw: nearest-neighbour upscale only, column by column. A
+    // smoothed stretched overlay was previously composited on top at 45%
+    // alpha, which is exactly what made this look like a blurry gradient
+    // smear instead of a measurement. Every cell now stays a hard-edged
+    // rectangle.
     const colW = cssW / w;
+    const rowH = cssH / h;
     ctx.imageSmoothingEnabled = false;
     for (let x = 0; x < w; x++) {
-      ctx.drawImage(off, x, 0, 1, h, x * colW, 0, Math.ceil(colW), cssH);
+      ctx.drawImage(off, x, 0, 1, h, x * colW, 0, Math.ceil(colW) + 0.5, cssH);
     }
-    // Vertical smoothing pass: overlay a slightly transparent stretched
-    // version with smoothing enabled to soften row edges into gradients.
-    ctx.imageSmoothingEnabled = true;
-    ctx.globalAlpha = 0.45;
-    ctx.drawImage(off, 0, 0, w, h, 0, 0, cssW, cssH);
-    ctx.globalAlpha = 1;
 
-    // Contour lines at 0.25 / 0.55 / 0.8 intensity.
-    ctx.strokeStyle = "rgba(255,255,255,0.30)";
-    ctx.lineWidth = 0.7;
+    // Hairline separators between feature rows — a real instrument grid,
+    // drawn crisply rather than blurring the data underneath.
+    ctx.strokeStyle = "rgba(2,6,23,0.55)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let y = 1; y < h; y++) {
+      const yPos = Math.round(y * rowH) + 0.5;
+      ctx.moveTo(0, yPos);
+      ctx.lineTo(cssW, yPos);
+    }
+    ctx.stroke();
+
+    // Threshold markers: a bright tick on the row where the deviation first
+    // crosses each level, so hot spots read as discrete events.
     for (const th of [0.25, 0.55, 0.8]) {
-      ctx.beginPath();
-      for (let x = 0; x < w - 1; x++) {
+      ctx.fillStyle = "rgba(255,255,255,0.85)";
+      for (let x = 0; x < w; x++) {
         for (let y = 0; y < h; y++) {
-          const v0 = visible[x] ? Math.abs(visible[x].deviations[keys[y]] ?? 0) / 0.9 : 0;
-          const v1 = visible[x + 1] ? Math.abs(visible[x + 1].deviations[keys[y]] ?? 0) / 0.9 : 0;
-          if ((v0 - th) * (v1 - th) < 0) {
-            const t = (th - v0) / (v1 - v0 || 1);
-            const px = (x + 0.5 + t) * colW;
-            const py = ((y + 0.5) / h) * cssH;
-            ctx.moveTo(px - 1.5, py);
-            ctx.lineTo(px + 1.5, py);
+          const v = visible[x] ? Math.abs(visible[x].deviations[keys[y]] ?? 0) / 0.9 : 0;
+          if (v >= th) {
+            ctx.fillRect(x * colW, y * rowH, Math.max(1, colW - 0.5), 1.5);
           }
         }
       }
-      ctx.stroke();
     }
 
     // Hover crosshair.
     if (hover && hover.group === group) {
       const hx = (hover.x + 0.5) * colW;
-      const hy = ((hover.y + 0.5) / h) * cssH;
-      ctx.strokeStyle = "rgba(255,255,255,0.85)";
+      const hy = (hover.y + 0.5) * rowH;
+      ctx.strokeStyle = "rgba(255,255,255,0.9)";
       ctx.lineWidth = 1;
-      ctx.strokeRect(hx - colW / 2, ((hover.y) / h) * cssH, colW, cssH / h);
+      ctx.strokeRect(hx - colW / 2, hover.y * rowH, Math.max(2, colW), rowH);
+      ctx.globalAlpha = 0.35;
       ctx.beginPath();
-      ctx.moveTo(hx, 0);
-      ctx.lineTo(hx, cssH);
-      ctx.globalAlpha = 0.25;
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(0, hy);
-      ctx.lineTo(cssW, hy);
+      ctx.moveTo(Math.round(hx) + 0.5, 0);
+      ctx.lineTo(Math.round(hx) + 0.5, cssH);
+      ctx.moveTo(0, Math.round(hy) + 0.5);
+      ctx.lineTo(cssW, Math.round(hy) + 0.5);
       ctx.stroke();
       ctx.globalAlpha = 1;
     }
@@ -159,33 +159,36 @@ function SpectralField({ keys, rows, start, label, group, hover, onHover }: Fiel
       <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
         {label}
       </p>
-      <div className="relative">
-        <canvas
-          ref={canvasRef}
-          className="h-[110px] w-full rounded-md ring-1 ring-border/60"
-          onMouseMove={(e) => {
-            const rect = e.currentTarget.getBoundingClientRect();
-            const w = Math.max(1, visible.length);
-            const x = Math.floor(((e.clientX - rect.left) / rect.width) * w);
-            const y = Math.floor(((e.clientY - rect.top) / rect.height) * keys.length);
-            onHover({
-              group,
-              x: Math.min(w - 1, Math.max(0, x)),
-              y: Math.min(keys.length - 1, Math.max(0, y)),
-            });
-          }}
-          onMouseLeave={() => onHover(null)}
-        />
-        {/* row labels overlay right side */}
-        <div className="pointer-events-none absolute inset-y-0 right-1 flex flex-col justify-around">
+      <div className="flex gap-1.5">
+        {/* Row labels in their own gutter, so they never sit on top of the
+            data (previously they were overlaid on the right edge). */}
+        <div className="flex w-[74px] shrink-0 flex-col justify-between py-px text-right">
           {keys.map((k) => (
             <span
               key={k}
-              className="rounded bg-background/70 px-1 text-[8px] leading-none text-muted-foreground"
+              className="text-[8px] leading-none text-muted-foreground"
             >
               {FEATURE_LABELS[k.split(":")[1] as FeatureName]}
             </span>
           ))}
+        </div>
+        <div className="relative min-w-0 flex-1">
+          <canvas
+            ref={canvasRef}
+            className="h-[132px] w-full rounded-md ring-1 ring-border/70"
+            onMouseMove={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              const w = Math.max(1, visible.length);
+              const x = Math.floor(((e.clientX - rect.left) / rect.width) * w);
+              const y = Math.floor(((e.clientY - rect.top) / rect.height) * keys.length);
+              onHover({
+                group,
+                x: Math.min(w - 1, Math.max(0, x)),
+                y: Math.min(keys.length - 1, Math.max(0, y)),
+              });
+            }}
+            onMouseLeave={() => onHover(null)}
+          />
         </div>
       </div>
     </div>
