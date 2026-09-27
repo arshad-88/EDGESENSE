@@ -119,15 +119,6 @@ function Adxl345Effect({ stateRef, position }: { stateRef: React.RefObject<Machi
           <meshBasicMaterial color="#38bdf8" transparent opacity={0} side={THREE.DoubleSide} depthWrite={false} />
         </mesh>
       ))}
-      {/* sensor body */}
-      <mesh position={[0, 0.012, 0]}>
-        <boxGeometry args={[0.035, 0.024, 0.028]} />
-        <meshStandardMaterial color="#0e7490" metalness={0.6} roughness={0.35} />
-      </mesh>
-      <mesh position={[0, 0.026, 0]}>
-        <boxGeometry args={[0.02, 0.006, 0.014]} />
-        <meshStandardMaterial color="#22d3ee" emissive="#22d3ee" emissiveIntensity={0.7} />
-      </mesh>
     </group>
   );
 }
@@ -168,15 +159,6 @@ function Inmp441Effect({ stateRef, position }: { stateRef: React.RefObject<Machi
           <meshBasicMaterial color="#fb923c" transparent opacity={0} side={THREE.DoubleSide} depthWrite={false} />
         </mesh>
       ))}
-      {/* mic board */}
-      <mesh position={[0, 0, 0.012]}>
-        <boxGeometry args={[0.04, 0.03, 0.008]} />
-        <meshStandardMaterial color="#7c2d12" metalness={0.4} roughness={0.5} />
-      </mesh>
-      <mesh position={[0, 0, 0.018]}>
-        <cylinderGeometry args={[0.008, 0.008, 0.004, 16]} />
-        <meshStandardMaterial color="#fb923c" emissive="#fb923c" emissiveIntensity={0.7} />
-      </mesh>
     </group>
   );
 }
@@ -213,9 +195,14 @@ function MotorAssembly({ stateRef }: { stateRef: React.RefObject<MachineState> }
     <group position={[0, 0.02, 0]} scale={1.55}>
       <Housing geometry={split.housing} />
       <Rotor geometry={split.rotor} stateRef={stateRef} />
-      {/* sensor positions tuned to the machine body (X = shaft axis) */}
-      <Adxl345Effect stateRef={stateRef} position={[0.18, 0.24, 0]} />
-      <Inmp441Effect stateRef={stateRef} position={[0.05, 0, 0.42]} />
+      {/*
+        Sensor effect anchors. The model already includes the physical ADXL345
+        (blue, top-left of housing) and INMP441 (near the pump inlet) meshes —
+        these groups only emit the sensing waves from those same positions;
+        they add no sensor geometry and never rotate (siblings of Housing).
+      */}
+      <Adxl345Effect stateRef={stateRef} position={[-0.28, 0.20, 0.04]} />
+      <Inmp441Effect stateRef={stateRef} position={[0.30, 0.10, 0.22]} />
     </group>
   );
 }

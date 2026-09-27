@@ -30,6 +30,10 @@ export class MachineAudio {
   /** Extra gain ramp on start/stop so the motor spins up/down audibly. */
   private envelope = 0;
   available = true;
+  /** Alarm siren nodes (created on first anomaly). */
+  private alarmOsc: OscillatorNode | null = null;
+  private alarmGain: GainNode | null = null;
+  private alarmOn = false;
 
   /** Must be called from a user-gesture handler (START MOTOR click). */
   start(): void {
@@ -171,6 +175,62 @@ export class MachineAudio {
     if (this.lfoGain) this.lfoGain.gain.setTargetAtTime((anom * 0.22 + heavy * 0.06) * env, t, 0.3);
   }
 
+  /**
+   * Large-sounding anomaly alarm — a two-tone industrial siren layered over
+   * the machine sound. Fades in while the anomaly persists, stops after it
+   * clears.
+   */
+  setAlarm(active: boolean): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.master) return;
+    if (active && !this.alarmOn) {
+      this.alarmOn = true;
+      const osc = ctx.createOscillator();
+      osc.type = "square";
+      const g = ctx.createGain();
+      g.gain.value = 0;
+      // Siren sweep 660 ↔ 880 Hz.
+      const sweep = ctx.createOscillator();
+      sweep.type = "sine";
+      sweep.frequency.value = 2.2;
+      const sweepDepth = ctx.createGain();
+      sweepDepth.gain.value = 110;
+      sweep.connect(sweepDepth);
+      sweepDepth.connect(osc.frequency);
+      osc.frequency.value = 770;
+      osc.connect(g);
+      // Route the alarm independently of the motor master gain so it stays
+      // loud even as the motor envelope changes, but respect overall level.
+      const out = ctx.createGain();
+      out.gain.value = 0.5;
+      g.connect(out);
+      out.connect(ctx.destination);
+      osc.start();
+      sweep.start();
+      g.gain.setTargetAtTime(0.35, ctx.currentTime, 0.15);
+      this.alarmOsc = osc;
+      this.alarmGain = g;
+      (osc as OscillatorNode & { _sweep?: OscillatorNode })._sweep = sweep;
+    } else if (!active && this.alarmOn) {
+      this.alarmOn = false;
+      if (this.alarmGain && this.alarmOsc) {
+        this.alarmGain.gain.setTargetAtTime(0, ctx.currentTime, 0.3);
+        const osc = this.alarmOsc;
+        const sweep = (osc as OscillatorNode & { _sweep?: OscillatorNode })._sweep ?? null;
+        window.setTimeout(() => {
+          try {
+            osc.stop();
+            sweep?.stop();
+          } catch {
+            /* ignore */
+          }
+        }, 1200);
+      }
+      this.alarmOsc = null;
+      this.alarmGain = null;
+    }
+  }
+
   stop(): void {
     if (!this.ctx || !this.master) return;
     // Envelope in update() handles the slow coast-down; just mark stopped.
@@ -182,6 +242,7 @@ export class MachineAudio {
       this.oscs.forEach((o) => o.stop());
       this.noiseSrc?.stop();
       this.lfo?.stop();
+      this.alarmOsc?.stop();
       void this.ctx?.close();
     } catch {
       /* ignore */

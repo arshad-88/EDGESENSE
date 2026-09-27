@@ -178,6 +178,8 @@ export function useMachine(): UseMachineApi {
       const state = engineRef.current.tick(pw, bh);
       audio.setTarget(state);
       audio.update();
+      // Large alarm while a corroborated anomaly is active.
+      audio.setAlarm(pw === "ON" && state.fusedAnomalyScore > 0.7);
       machineRef.current = state;
       setMachine(state);
 
@@ -241,13 +243,13 @@ export function useMachine(): UseMachineApi {
     if (powerRef.current === "OFF") return;
     setPower("STOPPING");
     audio.stop();
-    // Allow a short deceleration, then fully stop.
+    // Allow a slow deceleration (rotor coasts down, sound fades) before OFF.
     startupTimerRef.current = window.setTimeout(() => {
       setPower("OFF");
       setBehaviourState("NORMAL");
       simOverrideRef.current = {};
       setSnapshot(null);
-    }, 900);
+    }, 2800);
   }, [audio]);
 
   const setBehaviour = useCallback((b: Behaviour) => {

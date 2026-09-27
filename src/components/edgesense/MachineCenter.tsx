@@ -3,7 +3,8 @@
  * START/STOP control, behaviour selector, startup sequence readout and the
  * key live metrics. Everything derives from the single central machine state.
  */
-import { Play, Square, Radio, VolumeX } from "lucide-react";
+import { useRef, useState } from "react";
+import { Play, Square, Radio, VolumeX, Maximize2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   BEHAVIOUR_LABELS,
@@ -59,6 +60,17 @@ export function MachineCenter({
   onStop,
   onBehaviour,
 }: Props) {
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const toggleFullscreen = () => {
+    const el = viewportRef.current;
+    if (!el) return;
+    if (!document.fullscreenElement) {
+      void el.requestFullscreen?.().then(() => setIsFullscreen(true)).catch(() => {});
+    } else {
+      void document.exitFullscreen?.().then(() => setIsFullscreen(false)).catch(() => {});
+    }
+  };
   const tone = statusTone(machine);
   const running = machine.power === "ON" || machine.power === "STARTING";
   const powerLabel =
@@ -73,7 +85,10 @@ export function MachineCenter({
   return (
     <section className="grid gap-4 xl:grid-cols-[1.35fr_1fr]">
       {/* ---------------- 3D viewport ---------------- */}
-      <div className="relative overflow-hidden rounded-lg border border-border/60 bg-[radial-gradient(ellipse_at_50%_120%,rgba(56,189,248,0.07),transparent_60%)]">
+      <div
+        ref={viewportRef}
+        className="relative overflow-hidden rounded-lg border border-border/60 bg-[radial-gradient(ellipse_at_50%_120%,rgba(56,189,248,0.07),transparent_60%)]"
+      >
         <div className="absolute inset-0 bg-grid opacity-40" />
         <MachineScene stateRef={machineRef} className="relative h-[460px] w-full xl:h-[540px]" />
 
@@ -91,6 +106,16 @@ export function MachineCenter({
             </Badge>
           ) : null}
         </div>
+
+        {/* fullscreen toggle (YouTube-style icon button) */}
+        <button
+          onClick={toggleFullscreen}
+          aria-label="Toggle fullscreen"
+          title="Fullscreen"
+          className="absolute right-4 bottom-4 flex size-9 items-center justify-center rounded-md border border-border/60 bg-background/70 text-muted-foreground backdrop-blur transition-colors hover:border-foreground/40 hover:text-foreground"
+        >
+          <Maximize2 className="size-4" />
+        </button>
 
         {/* legend: sensor positions */}
         <div className="pointer-events-none absolute bottom-4 left-4 flex gap-4 text-[9px] tracking-widest">
