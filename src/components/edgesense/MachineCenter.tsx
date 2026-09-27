@@ -12,7 +12,7 @@ import {
   type Behaviour,
   type MachineState,
 } from "@/core/edgesense";
-import { MachineScene } from "@/three/MachineScene";
+import { MachineScene, SENSOR_INFO, type SensorInfo } from "@/three/MachineScene";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 
@@ -62,6 +62,7 @@ export function MachineCenter({
 }: Props) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [selectedSensor, setSelectedSensor] = useState<SensorInfo["id"] | null>(null);
   const toggleFullscreen = () => {
     const el = viewportRef.current;
     if (!el) return;
@@ -87,10 +88,43 @@ export function MachineCenter({
       {/* ---------------- 3D viewport ---------------- */}
       <div
         ref={viewportRef}
-        className="relative overflow-hidden rounded-lg border border-border/60 bg-[radial-gradient(ellipse_at_50%_120%,rgba(56,189,248,0.07),transparent_60%)]"
+        className="relative overflow-hidden rounded-lg border border-border/60 bg-[radial-gradient(ellipse_at_50%_115%,rgba(56,189,248,0.10),transparent_55%),radial-gradient(ellipse_at_85%_0%,rgba(251,146,60,0.06),transparent_50%)] bg-card"
       >
-        <div className="absolute inset-0 bg-grid opacity-40" />
-        <MachineScene stateRef={machineRef} className="relative h-[460px] w-full xl:h-[540px]" />
+        <div className="absolute inset-0 bg-grid opacity-30" />
+        <MachineScene
+          stateRef={machineRef}
+          className={isFullscreen ? "h-screen w-screen" : "relative h-[460px] w-full xl:h-[540px]"}
+          fullscreen={isFullscreen}
+          onSelectSensor={setSelectedSensor}
+          selectedSensor={selectedSensor}
+        />
+
+        {/* sensor info panel (after clicking a sensor) */}
+        {selectedSensor ? (
+          <div
+            className="absolute left-4 top-16 max-w-[260px] rounded-md border bg-background/90 p-3 backdrop-blur"
+            style={{ borderColor: `${SENSOR_INFO[selectedSensor].accent}55` }}
+          >
+            <p
+              className="text-xs font-bold tracking-widest"
+              style={{ color: SENSOR_INFO[selectedSensor].accent }}
+            >
+              {SENSOR_INFO[selectedSensor].name}
+            </p>
+            <p className="mt-0.5 text-[10px] font-semibold text-foreground">
+              {SENSOR_INFO[selectedSensor].duty}
+            </p>
+            <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+              {SENSOR_INFO[selectedSensor].measures}
+            </p>
+            <button
+              onClick={() => setSelectedSensor(null)}
+              className="mt-1.5 text-[9px] tracking-widest text-muted-foreground underline underline-offset-2 hover:text-foreground"
+            >
+              CLOSE
+            </button>
+          </div>
+        ) : null}
 
         {/* overlays */}
         <div className="pointer-events-none absolute left-4 top-4 flex flex-col gap-2">
@@ -139,6 +173,14 @@ export function MachineCenter({
             {machine.rpm > 0 ? `${machine.rpm.toFixed(0)} RPM` : "0 RPM"}
           </p>
         </div>
+
+        {isFullscreen ? (
+          <div className="pointer-events-none absolute inset-x-0 top-4 text-center">
+            <p className="text-[11px] font-bold tracking-[0.3em] text-foreground/80">
+              EDGESENSE · INDUSTRIAL MACHINE INTELLIGENCE
+            </p>
+          </div>
+        ) : null}
 
         <AnimatePresence>
           {machine.power === "STARTING" ? (

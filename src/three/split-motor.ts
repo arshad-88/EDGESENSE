@@ -12,7 +12,8 @@
  *    (stationary), housing shell/base/pump beyond that
  *
  * Split rule (per triangle, using its centroid):
- *   ROTOR  = radius ≤ 0.06 above the base  → shaft, rotor core, internal fan
+ *   ROTOR  = radius ≤ 0.06 above the base, X < guard window
+ *     → shaft (drive section), rotor core, internal fan
  *   HOUSING = everything else (windings are part of the stator — stationary,
  *   as are the coupling, yellow guard, housing, pump and base).
  *   This conservatively guarantees the guard, sensors and housing never spin.
@@ -30,6 +31,10 @@ export interface SplitResult {
 const ROTOR_RADIUS = 0.06;
 /** Bottom band (mounting feet / base) always stays stationary. */
 const FOOT_Y = -0.05;
+/** X beyond which the yellow coupling guard sits — its interior geometry is
+ * hidden by the guard itself, so the shaft segment inside it never needs to
+ * spin visually. Excluding it guarantees the guard never rotates. */
+const GUARD_X = 0.12;
 
 export function splitRotorFromHousing(source: THREE.BufferGeometry): SplitResult {
   const index = source.getIndex();
@@ -42,11 +47,12 @@ export function splitRotorFromHousing(source: THREE.BufferGeometry): SplitResult
     const a = index ? index.getX(t * 3) : t * 3;
     const b = index ? index.getX(t * 3 + 1) : t * 3 + 1;
     const c = index ? index.getX(t * 3 + 2) : t * 3 + 2;
+    const cx = index ? (pos.getX(a) + pos.getX(b) + pos.getX(c)) / 3 : 0;
     const cy = (pos.getY(a) + pos.getY(b) + pos.getY(c)) / 3;
     const cz = (pos.getZ(a) + pos.getZ(b) + pos.getZ(c)) / 3;
     const r = Math.hypot(cy, cz);
 
-    const isRotor = cy >= FOOT_Y && r <= ROTOR_RADIUS;
+    const isRotor = cy >= FOOT_Y && r <= ROTOR_RADIUS && cx < GUARD_X;
     (isRotor ? rotor : housing).push(a, b, c);
   }
 
