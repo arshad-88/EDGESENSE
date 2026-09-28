@@ -40,9 +40,10 @@ function Auth({ redirectAfterAuth }: { redirectAfterAuth?: string } = {}) {
     if (!authLoading && isAuthenticated) navigate(redirect);
   }, [authLoading, isAuthenticated, navigate, redirect]);
 
-  // Calm assembled-in-background machine.
+  // Calm, settled machine in the background — fully assembled so the field is
+  // still, and dimmed by `calm` so it never competes with the form.
   useEffect(() => {
-    revealRef.current = 0.75;
+    revealRef.current = 0.95;
   }, []);
 
   const handleEmailSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -72,7 +73,7 @@ function Auth({ redirectAfterAuth }: { redirectAfterAuth?: string } = {}) {
       await signIn("email-otp", formData);
       navigate(redirect);
     } catch {
-      revealRef.current = 0.75;
+      revealRef.current = 0.95;
       setError("The verification code you entered is incorrect.");
       setOtp("");
       setIsLoading(false);
@@ -87,7 +88,7 @@ function Auth({ redirectAfterAuth }: { redirectAfterAuth?: string } = {}) {
       await signIn("anonymous");
       navigate(redirect);
     } catch (e) {
-      revealRef.current = 0.75;
+      revealRef.current = 0.95;
       setError(`Failed to sign in as guest: ${e instanceof Error ? e.message : "Unknown error"}`);
       setIsLoading(false);
     }
@@ -98,6 +99,8 @@ function Auth({ redirectAfterAuth }: { redirectAfterAuth?: string } = {}) {
       <div className="pointer-events-none fixed inset-0 z-0">
         <div className="absolute inset-0 bg-[radial-gradient(1000px_640px_at_50%_55%,#0a1020,#05070d_78%)]" />
         <ParticleUniverse revealRef={revealRef} stateRef={stateRef} calm className="absolute inset-0" />
+        {/* the form column owns the left of the frame — keep the field off it */}
+        <div className="pointer-events-none absolute inset-y-0 left-0 w-[58%] bg-gradient-to-r from-[#05070d] from-10% via-[#05070d]/80 via-40% to-transparent" />
         <div className="hud-scanlines pointer-events-none absolute inset-0 opacity-30" />
         {/* machine illumination lift on password focus */}
         <div
@@ -109,8 +112,9 @@ function Auth({ redirectAfterAuth }: { redirectAfterAuth?: string } = {}) {
         />
       </div>
 
-      <div className="relative z-10 flex min-h-screen flex-col items-center justify-center px-6">
-        <a href="/" className="absolute left-6 top-5 text-[12px] font-bold tracking-[0.34em] text-foreground sm:left-10">
+      {/* Left-aligned so the assembled machine stays clear on the right. */}
+      <div className="relative z-10 flex min-h-screen flex-col justify-center px-6 sm:px-12 lg:px-16">
+        <a href="/" className="absolute left-6 top-5 text-[12px] font-bold tracking-[0.34em] text-foreground sm:left-12 lg:left-16">
           EDGE<span className="text-primary">SENSE</span>
         </a>
 

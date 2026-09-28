@@ -1,6 +1,7 @@
 import '@vly-ai/integrations';
 import { Toaster } from "@/components/ui/sonner";
 import { RequireAuth } from "@/components/RequireAuth";
+import { MachineLayout } from "@/hooks/machine-context";
 import { VlyToolbar } from "../vly-toolbar-readonly.tsx";
 import { ConvexAuthProvider } from "@convex-dev/auth/react";
 import { ConvexReactClient } from "convex/react";
@@ -128,46 +129,24 @@ createRoot(document.getElementById("root")!).render(
                 path="/auth"
                 element={<AuthPage redirectAfterAuth="/dashboard" />}
               />
+              {/* ONE machine state for the whole command center.
+                  `MachineLayout` is a layout route, so React keeps the single
+                  simulation engine (timer, audio, pipeline, edge link) mounted
+                  while the child page swaps — that is what makes START MOTOR
+                  carry across COMMAND → SIGNALS → BEHAVIOUR → INVESTIGATION. */}
               <Route
-                path="/dashboard"
                 element={
                   <RequireAuth>
-                    <Dashboard />
+                    <MachineLayout />
                   </RequireAuth>
                 }
-              />
-              <Route
-                path="/signals"
-                element={
-                  <RequireAuth>
-                    <Signals />
-                  </RequireAuth>
-                }
-              />
-              <Route
-                path="/behaviour"
-                element={
-                  <RequireAuth>
-                    <Behaviour />
-                  </RequireAuth>
-                }
-              />
-              <Route
-                path="/investigation"
-                element={
-                  <RequireAuth>
-                    <Investigation />
-                  </RequireAuth>
-                }
-              />
-              <Route
-                path="/simulator"
-                element={
-                  <RequireAuth>
-                    <Simulator />
-                  </RequireAuth>
-                }
-              />
+              >
+                <Route path="/dashboard" element={<Dashboard />} />
+                <Route path="/signals" element={<Signals />} />
+                <Route path="/behaviour" element={<Behaviour />} />
+                <Route path="/investigation" element={<Investigation />} />
+                <Route path="/simulator" element={<Simulator />} />
+              </Route>
               <Route path="*" element={<NotFound />} />
             </Routes>
           </Suspense>

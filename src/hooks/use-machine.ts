@@ -14,6 +14,11 @@
  * High-frequency visuals (3D rotation, sensor waves, waveforms) read the
  * machine state via a ref, avoiding React re-renders. Only the ~4 Hz snapshot
  * tick triggers React updates.
+ *
+ * Mount this ONCE, through `MachineProvider` (see hooks/machine-context.tsx) —
+ * never per page. Two instances would mean two engines, two audio graphs and
+ * two sets of timers, and a page that mounts its own copy resets the machine
+ * (power OFF, snapshot cleared, baseline retrained) on every navigation.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
@@ -241,6 +246,16 @@ export function useMachine(): UseMachineApi {
       if (startupTimerRef.current !== null) window.clearTimeout(startupTimerRef.current);
     };
   }, [audio, sessionId]);
+
+  /* Release the audio graph when the provider goes away (sign-out, or any
+   * teardown of the command center) so no session can leave a motor drone
+   * running behind the login page. `dispose()` is recoverable — the next
+   * START MOTOR rebuilds the graph. */
+  useEffect(() => {
+    return () => {
+      audio.dispose();
+    };
+  }, [audio]);
 
   /* ---------------------------- power control -------------------------- */
   const startMotor = useCallback(() => {

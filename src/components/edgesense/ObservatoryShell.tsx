@@ -3,14 +3,16 @@
  * of the command center. Keeps the identity bar, the SIMULATION MODE badges
  * and a minimal section nav; pages themselves hold only their own content.
  *
- * Each page mounts its own `useMachine()` — the engine is deterministic and
- * cheap, and pages are visited one at a time, so this stays the single source
- * of truth without needing a global store.
+ * The shell reads the ONE global machine state from `MachineProvider` (mounted
+ * once by `MachineLayout` in the router). It must never call `useMachine()`
+ * itself — that is what used to reset power, waveforms and the learned
+ * baseline on every route change.
  */
 import { Link, useLocation, useNavigate } from "react-router";
 import { LogOut, Waves, Loader2 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
-import { useMachine } from "@/hooks/use-machine";
+import { useMachineContext } from "@/hooks/machine-context";
+import type { UseMachineApi } from "@/hooks/use-machine";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
@@ -22,21 +24,16 @@ const SECTIONS = [
   ["/simulator", "SIMULATOR"],
 ] as const;
 
-
 export function ObservatoryShell({
   children,
-  running,
-  anomalous,
 }: {
-  children: (api: ReturnType<typeof useMachine>) => React.ReactNode;
-  running?: boolean;
-  anomalous?: boolean;
+  children: (api: UseMachineApi) => React.ReactNode;
 }) {
   const { signOut } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const api = useMachine();
-  const isRunning = running ?? (api.machine.power === "ON" || api.machine.power === "STARTING");
+  const api = useMachineContext();
+  const running = api.machine.power === "ON" || api.machine.power === "STARTING";
 
   if (!api.baselineReady) {
     return (
@@ -95,14 +92,14 @@ export function ObservatoryShell({
               <span
                 className={cn(
                   "size-1.5 rounded-full",
-                  isRunning
-                    ? anomalous || api.machine.fusedAnomalyScore > 0.7
+                  running
+                    ? api.machine.fusedAnomalyScore > 0.7
                       ? "animate-pulse bg-status-anomaly"
                       : "animate-pulse bg-status-healthy"
                     : "bg-muted-foreground",
                 )}
               />
-              {isRunning ? "acquisition active" : "acquisition inactive"}
+              {running ? "acquisition active" : "acquisition inactive"}
             </span>
             <button
               className="underline-offset-2 hover:text-foreground hover:underline"

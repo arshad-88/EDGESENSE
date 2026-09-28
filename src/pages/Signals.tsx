@@ -74,7 +74,16 @@ export default function Signals() {
                             />
                           );
                         })
-                      : <p className="w-full text-center text-[11px] text-muted-foreground">no stream — machine off</p>}
+                      : (
+                          <div className="w-full text-center">
+                            <p className="text-[10px] font-bold tracking-[0.2em] text-muted-foreground">
+                              MACHINE OFF
+                            </p>
+                            <p className="mt-1 text-[11px] text-muted-foreground/70">
+                              Start the machine to begin acquisition.
+                            </p>
+                          </div>
+                        )}
                   </div>
                 </div>
                 <div>
@@ -124,7 +133,16 @@ export default function Signals() {
                             />
                           );
                         })
-                      : <p className="w-full text-center text-[11px] text-muted-foreground">no stream — machine off</p>}
+                      : (
+                          <div className="w-full text-center">
+                            <p className="text-[10px] font-bold tracking-[0.2em] text-muted-foreground">
+                              MACHINE OFF
+                            </p>
+                            <p className="mt-1 text-[11px] text-muted-foreground/70">
+                              Start the machine to begin acquisition.
+                            </p>
+                          </div>
+                        )}
                   </div>
                 </div>
                 <div>
