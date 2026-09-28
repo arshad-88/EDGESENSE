@@ -76,6 +76,17 @@
   --sidebar-accent-foreground: oklch(0.93 0.01 220);
   --sidebar-border: oklch(0.32 0.02 245);
   --sidebar-ring: oklch(0.7 0.12 195);
+
+  /* ---- EdgeSense design tokens ----
+     These were referenced by the utility classes below but never defined,
+     so every status colour and the engineering grid silently rendered as
+     nothing. Keep them declared. */
+  --status-healthy: oklch(0.79 0.17 158);
+  --status-suspicious: oklch(0.84 0.16 85);
+  --status-anomaly: oklch(0.68 0.21 25);
+  --edge-grid: oklch(0.8 0.12 195 / 0.07);
+  --edge-corner: oklch(0.8 0.14 195 / 0.6);
+  --edge-glow: oklch(0.8 0.15 195 / 0.16);
 }
 
 .dark {
@@ -110,6 +121,17 @@
   --sidebar-accent-foreground: oklch(0.93 0.01 220);
   --sidebar-border: oklch(0.32 0.02 245);
   --sidebar-ring: oklch(0.7 0.12 195);
+
+  /* ---- EdgeSense design tokens ----
+     These were referenced by the utility classes below but never defined,
+     so every status colour and the engineering grid silently rendered as
+     nothing. Keep them declared. */
+  --status-healthy: oklch(0.79 0.17 158);
+  --status-suspicious: oklch(0.84 0.16 85);
+  --status-anomaly: oklch(0.68 0.21 25);
+  --edge-grid: oklch(0.8 0.12 195 / 0.07);
+  --edge-corner: oklch(0.8 0.14 195 / 0.6);
+  --edge-glow: oklch(0.8 0.15 195 / 0.16);
 }
 
 @layer base {
@@ -134,10 +156,59 @@
       linear-gradient(to bottom, var(--edge-grid) 1px, transparent 1px);
     background-size: 28px 28px;
   }
+
+  /* Full-page ambience: engineering grid + two soft sensor glows. */
+  .bg-observatory {
+    background-image:
+      radial-gradient(1100px 620px at 18% -12%, oklch(0.8 0.15 195 / 0.1), transparent 62%),
+      radial-gradient(900px 520px at 88% 4%, oklch(0.84 0.15 85 / 0.06), transparent 60%),
+      linear-gradient(to right, var(--edge-grid) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--edge-grid) 1px, transparent 1px);
+    background-size: 100% 100%, 100% 100%, 44px 44px, 44px 44px;
+  }
+
   .glass-panel {
     background: color-mix(in oklab, var(--card) 82%, transparent);
     backdrop-filter: blur(8px);
   }
+
+  /* Technical instrument panel: subtle vertical sheen, hairline border. */
+  .panel {
+    position: relative;
+    background: linear-gradient(
+      180deg,
+      color-mix(in oklab, var(--card) 90%, transparent),
+      color-mix(in oklab, var(--card) 55%, transparent)
+    );
+    border: 1px solid color-mix(in oklab, var(--border) 85%, transparent);
+  }
+
+  /* Four L-shaped registration corners — the "technical drawing sheet" cue. */
+  .panel > .corner {
+    position: absolute;
+    width: 9px;
+    height: 9px;
+    border-color: var(--edge-corner);
+    pointer-events: none;
+  }
+  .corner-tl { top: -1px; left: -1px; border-top: 1px solid; border-left: 1px solid; }
+  .corner-tr { top: -1px; right: -1px; border-top: 1px solid; border-right: 1px solid; }
+  .corner-bl { bottom: -1px; left: -1px; border-bottom: 1px solid; border-left: 1px solid; }
+  .corner-br { bottom: -1px; right: -1px; border-bottom: 1px solid; border-right: 1px solid; }
+
+  /* Small uppercase instrument labels. */
+  .label-tech {
+    font-size: 10px;
+    line-height: 1;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+  }
+
+  /* Tabular readouts so numbers don't jitter as they update. */
+  .tnum { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
+
+  /* Status accents */
   .text-status-healthy { color: var(--status-healthy); }
   .text-status-suspicious { color: var(--status-suspicious); }
   .text-status-anomaly { color: var(--status-anomaly); }
