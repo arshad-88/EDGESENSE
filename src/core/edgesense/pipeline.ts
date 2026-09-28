@@ -301,13 +301,21 @@ export class EdgeSensePipeline {
 
   snapshot(): PipelineSnapshot {
     const latest = this.frames[this.frames.length - 1] ?? null;
+    // NOTE: these buffers are mutated in place (push/shift), so the array
+    // instances themselves never change. Returning them directly handed React
+    // the same reference on every tick, which meant any consumer memoised on
+    // the array — `useMemo(() => rows.slice(start), [rows])`, `useEffect(…,
+    // [visible])` — saw no change and never redrew. The symptom was canvases
+    // that painted once and then froze (the heatmap being the most obvious).
+    // Shallow copies give consumers a fresh reference each tick; the row
+    // objects inside are immutable once pushed, so this is safe and cheap.
     return {
-      frames: this.frames,
+      frames: [...this.frames],
       latest,
-      heatmap: this.heatmap,
+      heatmap: [...this.heatmap],
       cloud: {
-        baseline: this.cloudBaseline,
-        live: this.cloudLive,
+        baseline: [...this.cloudBaseline],
+        live: [...this.cloudLive],
         trajectory: this.cloudLive.slice(-TRAJECTORY_LIMIT),
       },
       fingerprint: latest ? buildFingerprint(latest, this.bundle!.metadata) : { vibration: [], acoustic: [] },

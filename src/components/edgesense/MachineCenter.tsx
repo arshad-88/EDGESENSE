@@ -74,6 +74,15 @@ export function MachineCenter({
   };
   const tone = statusTone(machine);
   const running = machine.power === "ON" || machine.power === "STARTING";
+  /**
+   * Machine health, the single most important number on the screen.
+   * Derived from the same fused anomaly score the rest of the UI uses, so this
+   * is a presentation of existing state, not a new signal. A stopped machine
+   * reports 0% because nothing is being assessed.
+   */
+  const healthPct = running
+    ? Math.max(0, Math.min(100, Math.round((1 - machine.fusedAnomalyScore) * 100)))
+    : 0;
   const powerLabel =
     machine.power === "STARTING"
       ? (startupStep ?? "STARTING")
@@ -84,11 +93,13 @@ export function MachineCenter({
           : `MACHINE RUNNING · ${BEHAVIOUR_LABELS[machine.behaviour]}`;
 
   return (
-    <section className="grid gap-4 xl:grid-cols-[1.35fr_1fr]">
-      {/* ---------------- 3D viewport ---------------- */}
+    <section className="space-y-4">
+      {/* ---------------- 3D stage: the hero of the product ----------------
+          Full width and tall, with the status readout floating in the scene
+          rather than boxed in a card beside it. */}
       <div
         ref={viewportRef}
-        className="relative overflow-hidden rounded-lg border border-border/60 bg-[radial-gradient(ellipse_at_50%_115%,rgba(56,189,248,0.10),transparent_55%),radial-gradient(ellipse_at_85%_0%,rgba(251,146,60,0.06),transparent_50%)] bg-card"
+        className="relative min-h-[380px] overflow-hidden rounded-xl border border-border/60 bg-[radial-gradient(ellipse_at_50%_118%,rgba(56,189,248,0.13),transparent_58%),radial-gradient(ellipse_at_88%_-5%,rgba(251,146,60,0.08),transparent_52%)] bg-card lg:min-h-[520px]"
       >
         <div className="absolute inset-0 bg-grid opacity-30" />
 
@@ -192,15 +203,37 @@ export function MachineCenter({
           </span>
         </div>
 
-        {/* status overlay */}
-        <div className="pointer-events-none absolute right-4 top-4 text-right">
-          <p className={cn("flex items-center justify-end gap-1.5 text-[11px] font-bold tracking-widest", tone.text)}>
+        {/* ---- LEVEL 1: machine health, floating in the scene ---- */}
+        <div className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 sm:left-6">
+          <p className="label-tech">MACHINE HEALTH</p>
+          <p
+            className={cn(
+              "tnum mt-1 text-4xl font-bold leading-none tracking-tight sm:text-5xl",
+              tone.text,
+            )}
+          >
+            {healthPct}
+            <span className="text-2xl align-top sm:text-3xl">%</span>
+          </p>
+          <p
+            className={cn(
+              "mt-2 flex items-center gap-1.5 text-[11px] font-bold tracking-[0.2em]",
+              tone.text,
+            )}
+          >
             <span className={cn("size-1.5 rounded-full", tone.dot)} />
             {tone.label}
           </p>
-          <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">
-            {machine.rpm > 0 ? `${machine.rpm.toFixed(0)} RPM` : "0 RPM"}
+          <p className="tnum mt-3 text-[11px] text-muted-foreground">
+            {machine.rpm > 0 ? machine.rpm.toFixed(0) : "0"}
+            <span className="ml-1">RPM</span>
           </p>
+          <div className="mt-3 h-0.5 w-24 overflow-hidden rounded-full bg-border/60">
+            <div
+              className={cn("h-full transition-[width] duration-500 ease-out", tone.dot)}
+              style={{ width: `${healthPct}%` }}
+            />
+          </div>
         </div>
 
         {isFullscreen ? (
@@ -240,8 +273,8 @@ export function MachineCenter({
         </AnimatePresence>
       </div>
 
-      {/* ---------------- control column ---------------- */}
-      <div className="flex flex-col gap-4">
+      {/* ---------------- control deck ---------------- */}
+      <div className="grid gap-4 lg:grid-cols-[minmax(280px,360px)_1fr]">
         <div className="panel rounded-lg p-4">
           <span className="corner corner-tl" />
           <span className="corner corner-tr" />
