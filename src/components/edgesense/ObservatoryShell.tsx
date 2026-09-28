@@ -36,7 +36,7 @@ export function ObservatoryShell({
   const navigate = useNavigate();
   const location = useLocation();
   const api = useMachine();
-  const isRunning = running ?? api.machine.power === "ON" || api.machine.power === "STARTING";
+  const isRunning = running ?? (api.machine.power === "ON" || api.machine.power === "STARTING");
 
   if (!api.baselineReady) {
     return (

@@ -79,7 +79,7 @@ export default function Investigation() {
           ? { label: "NO DATA — MACHINE OFF", tone: "text-muted-foreground" }
           : fused?.decision === "corroborated-anomaly"
             ? { label: "CORROBORATED ANOMALY", tone: "text-status-anomaly" }
-            : fused?.decision === "suspicious"
+            : (fused?.decision ?? "").startsWith("suspicious")
               ? { label: "SENSOR DISAGREEMENT — SUSPICIOUS", tone: "text-status-suspicious" }
               : { label: "HEALTHY", tone: "text-status-healthy" };
 
