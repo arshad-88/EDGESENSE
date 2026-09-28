@@ -20,11 +20,15 @@
  *                                     the yellow coupling guard sits at x ≈ 0.01
  *
  * ── The parts ──────────────────────────────────────────────────────────
- * ADXL345 — 3-axis accelerometer bolted on top of the motor housing. Screen
- *           position from the side-on view pins x = 0.372 exactly; the local
- *           surface there (z ≈ 0.075) tops out at y = 0.153, so the marker
- *           sits just above it. Sitting higher than this made the marker
- *           float above the box rather than on it.
+ * ADXL345 — the small BLUE BOX bolted on the motor's top/front shoulder
+ *           (on the finned deck, roughly a third of the way along from the
+ *           fan end). Identified by geometry: a compact 97-triangle,
+ *           box-like component ~59 × 27 × 19 mm centred at (0.337, 0.115,
+ *           0.062) with its top face at y = 0.127 — raised just above the
+ *           fin deck, so it reads as a bolted-on cube. Earlier values were
+ *           both too far toward the fan end AND ~30 mm too high, so the
+ *           marker hovered in mid-air near the terminal box. The anchor sits
+ *           ~3 mm above the box's top face, i.e. resting on it.
  *
  * INMP441 — MEMS microphone on the pump side: a ~34 mm near-spherical head
  *           (sphericity 1.22) centred at (−0.250, 0.111, −0.031), top at
@@ -37,6 +41,6 @@
 export type SensorId = "ADXL345" | "INMP441";
 
 export const SENSOR_ANCHORS: Record<SensorId, [number, number, number]> = {
-  ADXL345: [0.372, 0.156, 0.075],
+  ADXL345: [0.337, 0.13, 0.062],
   INMP441: [-0.25, 0.135, -0.031],
 };
