@@ -1,57 +1,50 @@
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import {
-  InputOTP,
-  InputOTPGroup,
-  InputOTPSlot,
-} from "@/components/ui/input-otp";
-
-import { useAuth } from "@/hooks/use-auth";
-import logo from "@/assets/logo.svg";
-import { ArrowRight, Loader2, Mail, UserX } from "lucide-react";
-import { Suspense, useEffect, useState } from "react";
+/**
+ * Auth — entering the machine intelligence layer.
+ *
+ * Same particle engine as the landing page, calmer: the machine sits faintly
+ * assembled in the background while a minimal interface floats over the field.
+ * Focus on email energises the local field; focus on password lifts the
+ * machine's illumination; successful sign-in eases the reveal to 1 and
+ * navigates — entering the machine, literally.
+ */
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
+import { useAuth } from "@/hooks/use-auth";
+import { ParticleUniverse } from "@/three/ParticleUniverse";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { ArrowRight, Loader2 } from "lucide-react";
 
-interface AuthProps {
-  redirectAfterAuth?: string;
-}
-
-function resolveRedirectAfterAuth(
-  returnTo: string | null,
-  fallback = "/dashboard",
-) {
-  if (returnTo?.startsWith("/") && !returnTo.startsWith("//")) {
-    return returnTo;
-  }
+function resolveRedirectAfterAuth(returnTo: string | null, fallback = "/dashboard") {
+  if (returnTo?.startsWith("/") && !returnTo.startsWith("//")) return returnTo;
   return fallback;
 }
 
-function Auth({ redirectAfterAuth }: AuthProps = {}) {
+function Auth({ redirectAfterAuth }: { redirectAfterAuth?: string } = {}) {
   const { isLoading: authLoading, isAuthenticated, signIn } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const redirect = resolveRedirectAfterAuth(
-    searchParams.get("returnTo"),
-    redirectAfterAuth,
-  );
+  const redirect = resolveRedirectAfterAuth(searchParams.get("returnTo"), redirectAfterAuth);
+
   const [step, setStep] = useState<"signIn" | { email: string }>("signIn");
   const [otp, setOtp] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Particle engine coupling — refs, never re-renders.
+  const revealRef = useRef(0);
+  const stateRef = useRef({ power: "OFF", rpm: 0, vibrationRms: 0, acousticLevel: 0, fusedAnomalyScore: 0, behaviour: "NORMAL" });
+  const glowRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
-    if (!authLoading && isAuthenticated) {
-      navigate(redirect);
-    }
+    if (!authLoading && isAuthenticated) navigate(redirect);
   }, [authLoading, isAuthenticated, navigate, redirect]);
+
+  // Calm assembled-in-background machine.
+  useEffect(() => {
+    revealRef.current = 0.75;
+  }, []);
+
   const handleEmailSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsLoading(true);
@@ -60,14 +53,9 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       const formData = new FormData(event.currentTarget);
       await signIn("email-otp", formData);
       setStep({ email: formData.get("email") as string });
-      setIsLoading(false);
-    } catch (error) {
-      console.error("Email sign-in error:", error);
-      setError(
-        error instanceof Error
-          ? error.message
-          : "Failed to send verification code. Please try again.",
-      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to send verification code.");
+    } finally {
       setIsLoading(false);
     }
   };
@@ -78,18 +66,16 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     setError(null);
     try {
       const formData = new FormData(event.currentTarget);
+      // Enter-the-machine moment: full assembly before navigating.
+      revealRef.current = 1;
+      stateRef.current = { ...stateRef.current, power: "ON", rpm: 1450, vibrationRms: 0.4 };
       await signIn("email-otp", formData);
-
-      console.log("signed in");
-
       navigate(redirect);
-    } catch (error) {
-      console.error("OTP verification error:", error);
-
+    } catch {
+      revealRef.current = 0.75;
       setError("The verification code you entered is incorrect.");
-      setIsLoading(false);
-
       setOtp("");
+      setIsLoading(false);
     }
   };
 
@@ -97,205 +83,111 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     setIsLoading(true);
     setError(null);
     try {
-      console.log("Attempting anonymous sign in...");
+      revealRef.current = 1;
       await signIn("anonymous");
-      console.log("Anonymous sign in successful");
       navigate(redirect);
-    } catch (error) {
-      console.error("Guest login error:", error);
-      console.error("Error details:", JSON.stringify(error, null, 2));
-      setError(`Failed to sign in as guest: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } catch (e) {
+      revealRef.current = 0.75;
+      setError(`Failed to sign in as guest: ${e instanceof Error ? e.message : "Unknown error"}`);
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="relative min-h-screen overflow-hidden bg-[#05070d]">
+      <div className="pointer-events-none fixed inset-0 z-0">
+        <div className="absolute inset-0 bg-[radial-gradient(1000px_640px_at_50%_55%,#0a1020,#05070d_78%)]" />
+        <ParticleUniverse revealRef={revealRef} stateRef={stateRef} calm className="absolute inset-0" />
+        <div className="hud-scanlines pointer-events-none absolute inset-0 opacity-30" />
+        {/* machine illumination lift on password focus */}
+        <div
+          ref={glowRef}
+          className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-700"
+          onFocusCapture={() => (glowRef.current!.style.opacity = "0.35")}
+          onBlurCapture={() => (glowRef.current!.style.opacity = "0")}
+          style={{ background: "radial-gradient(700px 500px at 50% 45%, rgba(56,189,248,0.12), transparent 70%)" }}
+        />
+      </div>
 
-      
-      {/* Auth Content */}
-      <div className="flex-1 flex items-center justify-center">
-        <div className="flex items-center justify-center h-full flex-col">
-        <Card className="min-w-[350px] pb-0 border shadow-md">
+      <div className="relative z-10 flex min-h-screen flex-col items-center justify-center px-6">
+        <a href="/" className="absolute left-6 top-5 text-[12px] font-bold tracking-[0.34em] text-foreground sm:left-10">
+          EDGE<span className="text-primary">SENSE</span>
+        </a>
+
+        <div className="w-full max-w-sm">
+          <p className="label-tech text-primary/80">EDGESENSE · ACCESS</p>
+          <h1 className="mt-3 text-2xl font-bold leading-tight tracking-tight">
+            Enter the machine
+            <br />
+            intelligence layer
+          </h1>
+
           {step === "signIn" ? (
-            <>
-              <CardHeader className="text-center">
-              <div className="flex justify-center">
-                    <img
-                      src={logo}
-                      alt="Lock Icon"
-                      width={64}
-                      height={64}
-                      className="rounded-lg mb-4 mt-4 cursor-pointer"
-                      onClick={() => navigate("/")}
-                    />
-                  </div>
-                <CardTitle className="text-xl">Get Started</CardTitle>
-                <CardDescription>
-                  Enter your email to log in or sign up
-                </CardDescription>
-              </CardHeader>
-              <form onSubmit={handleEmailSubmit}>
-                <CardContent>
-                  
-                  <div className="relative flex items-center gap-2">
-                    <div className="relative flex-1">
-                      <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                      <Input
-                        name="email"
-                        placeholder="name@example.com"
-                        type="email"
-                        className="pl-9"
-                        disabled={isLoading}
-                        required
-                      />
-                    </div>
-                    <Button
-                      type="submit"
-                      variant="outline"
-                      size="icon"
-                      disabled={isLoading}
-                    >
-                      {isLoading ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <ArrowRight className="h-4 w-4" />
-                      )}
-                    </Button>
-                  </div>
-                  {error && (
-                    <p className="mt-2 text-sm text-red-500">{error}</p>
-                  )}
-                  
-                  <div className="mt-4">
-                    <div className="relative">
-                      <div className="absolute inset-0 flex items-center">
-                        <span className="w-full border-t" />
-                      </div>
-                      <div className="relative flex justify-center text-xs uppercase">
-                        <span className="bg-background px-2 text-muted-foreground">
-                          Or
-                        </span>
-                      </div>
-                    </div>
-                    
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="w-full mt-4"
-                      onClick={handleGuestLogin}
-                      disabled={isLoading}
-                    >
-                      <UserX className="mr-2 h-4 w-4" />
-                      Continue as Guest
-                    </Button>
-                  </div>
-                </CardContent>
-              </form>
-            </>
+            <form onSubmit={handleEmailSubmit} className="mt-8 space-y-3">
+              <Input
+                name="email"
+                type="email"
+                required
+                placeholder="name@example.com"
+                disabled={isLoading}
+                className="border-border/50 bg-background/40 backdrop-blur"
+              />
+              <Button type="submit" disabled={isLoading} className="w-full gap-2 tracking-[0.16em]">
+                {isLoading ? <Loader2 className="size-4 animate-spin" /> : (
+                  <>CONTINUE <ArrowRight className="size-3.5" /></>
+                )}
+              </Button>
+              <button
+                type="button"
+                onClick={handleGuestLogin}
+                disabled={isLoading}
+                className="w-full pt-1 text-center text-[11px] tracking-[0.16em] text-muted-foreground transition-colors hover:text-foreground"
+              >
+                OR CONTINUE AS GUEST →
+              </button>
+              {error && <p className="text-xs text-status-anomaly">{error}</p>}
+            </form>
           ) : (
-            <>
-              <CardHeader className="text-center mt-4">
-                <CardTitle>Check your email</CardTitle>
-                <CardDescription>
-                  We've sent a code to {step.email}
-                </CardDescription>
-              </CardHeader>
-              <form onSubmit={handleOtpSubmit}>
-                <CardContent className="pb-4">
-                  <input type="hidden" name="email" value={step.email} />
-                  <input type="hidden" name="code" value={otp} />
-
-                  <div className="flex justify-center">
-                    <InputOTP
-                      value={otp}
-                      onChange={setOtp}
-                      maxLength={6}
-                      disabled={isLoading}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && otp.length === 6 && !isLoading) {
-                          // Find the closest form and submit it
-                          const form = (e.target as HTMLElement).closest("form");
-                          if (form) {
-                            form.requestSubmit();
-                          }
-                        }
-                      }}
-                    >
-                      <InputOTPGroup>
-                        {Array.from({ length: 6 }).map((_, index) => (
-                          <InputOTPSlot key={index} index={index} />
-                        ))}
-                      </InputOTPGroup>
-                    </InputOTP>
-                  </div>
-                  {error && (
-                    <p className="mt-2 text-sm text-red-500 text-center">
-                      {error}
-                    </p>
-                  )}
-                  <p className="text-sm text-muted-foreground text-center mt-4">
-                    Didn't receive a code?{" "}
-                    <Button
-                      variant="link"
-                      className="p-0 h-auto"
-                      onClick={() => setStep("signIn")}
-                    >
-                      Try again
-                    </Button>
-                  </p>
-                </CardContent>
-                <CardFooter className="flex-col gap-2">
-                  <Button
-                    type="submit"
-                    className="w-full"
-                    disabled={isLoading || otp.length !== 6}
-                  >
-                    {isLoading ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Verifying...
-                      </>
-                    ) : (
-                      <>
-                        Verify code
-                        <ArrowRight className="ml-2 h-4 w-4" />
-                      </>
-                    )}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={() => setStep("signIn")}
-                    disabled={isLoading}
-                    className="w-full"
-                  >
-                    Use different email
-                  </Button>
-                </CardFooter>
-              </form>
-            </>
+            <form onSubmit={handleOtpSubmit} className="mt-8 space-y-3">
+              <p className="text-[13px] text-muted-foreground">
+                A 6-digit code was sent to <span className="text-foreground">{step.email}</span>.
+              </p>
+              <Input
+                value={otp}
+                onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                inputMode="numeric"
+                placeholder="······"
+                autoFocus
+                className="border-border/50 bg-background/40 text-center font-mono text-lg tracking-[0.6em] backdrop-blur"
+              />
+              <Button type="submit" disabled={isLoading || otp.length !== 6} className="w-full gap-2 tracking-[0.16em]">
+                {isLoading ? <Loader2 className="size-4 animate-spin" /> : (
+                  <>ENTER SYSTEM <ArrowRight className="size-3.5" /></>
+                )}
+              </Button>
+              <button
+                type="button"
+                onClick={() => { setStep("signIn"); setOtp(""); }}
+                className="w-full pt-1 text-center text-[11px] tracking-[0.16em] text-muted-foreground hover:text-foreground"
+              >
+                USE A DIFFERENT EMAIL
+              </button>
+              {error && <p className="text-xs text-status-anomaly">{error}</p>}
+            </form>
           )}
 
-          <div className="py-4 px-6 text-xs text-center text-muted-foreground bg-muted border-t rounded-b-lg">
-            Secured by{" "}
-            <a
-              href="https://freebuff.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="underline hover:text-primary transition-colors"
-            >
-              freebuff.com
-            </a>
-          </div>
-        </Card>
+          <p className="mt-10 text-[10px] leading-5 tracking-[0.14em] text-muted-foreground/60">
+            THE ENVIRONMENT YOU SEE IS THE PRODUCT'S SUBJECT —
+            <br />
+            A MACHINE LEARNING ITS OWN NORMAL BEHAVIOUR.
+          </p>
         </div>
       </div>
     </div>
   );
 }
 
-export default function AuthPage(props: AuthProps) {
+export default function AuthPage(props: { redirectAfterAuth?: string }) {
   return (
     <Suspense>
       <Auth {...props} />

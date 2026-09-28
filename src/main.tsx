@@ -13,6 +13,10 @@ import "./index.css";
 const Landing = lazy(() => import("./pages/Landing.tsx"));
 const AuthPage = lazy(() => import("./pages/Auth.tsx"));
 const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
+const Signals = lazy(() => import("./pages/Signals.tsx"));
+const Behaviour = lazy(() => import("./pages/Behaviour.tsx"));
+const Investigation = lazy(() => import("./pages/Investigation.tsx"));
+const Simulator = lazy(() => import("./pages/Simulator.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 
 // Simple loading fallback for route transitions
@@ -129,6 +133,38 @@ createRoot(document.getElementById("root")!).render(
                 element={
                   <RequireAuth>
                     <Dashboard />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/signals"
+                element={
+                  <RequireAuth>
+                    <Signals />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/behaviour"
+                element={
+                  <RequireAuth>
+                    <Behaviour />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/investigation"
+                element={
+                  <RequireAuth>
+                    <Investigation />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/simulator"
+                element={
+                  <RequireAuth>
+                    <Simulator />
                   </RequireAuth>
                 }
               />
