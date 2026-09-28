@@ -64,6 +64,17 @@ const schema = defineSchema(
     })
       .index("by_session", ["sessionId", "timestamp"])
       .index("by_wallclock", ["wallClock"]),
+
+    // Running totals for the whole event table.
+    //
+    // These used to be computed by reading every event document on demand,
+    // which meant each insert re-read the entire history — see the comment in
+    // events.ts. Keeping a single tiny counter document instead means stats
+    // cost one small read no matter how many events exist.
+    edgesenseStats: defineTable({
+      total: v.number(),
+      byState: v.record(v.string(), v.number()),
+    }),
   },
   {
     schemaValidation: false,

@@ -41,6 +41,17 @@ import { MachineAudio } from "@/three/machine-audio";
 const TRAINING_WINDOWS = 90;
 const TICK_MS = 250; // state engine + pipeline cadence
 
+/**
+ * Minimum gap between two persisted anomaly events.
+ *
+ * The engine ticks every 250 ms and every frame whose decision is not
+ * "healthy" used to write an event — up to 4 database writes a second, which
+ * is what exhausted the database bandwidth allowance. Recording only on a
+ * state change, and otherwise at most once every few seconds, keeps the event
+ * history meaningful without hammering the backend.
+ */
+const EVENT_MIN_GAP_MS = 4000;
+
 export interface UseMachineApi {
   machine: MachineState;
   /** Ref mirroring `machine` for high-frequency consumers (3D, waveforms). */
@@ -98,6 +109,8 @@ export function useMachine(): UseMachineApi {
   );
   const recordEventRef = useRef(recordEvent);
   recordEventRef.current = recordEvent;
+  /** Last persisted event, used to throttle and de-duplicate writes. */
+  const lastEventRef = useRef<{ at: number; state: string }>({ at: 0, state: "" });
 
   /* ------------------------- baseline training ------------------------ */
   const ensureBaseline = useCallback(async () => {
@@ -195,19 +208,26 @@ export function useMachine(): UseMachineApi {
         if (frame) {
           setSnapshot(pipelineRef.current.snapshot());
           if (frame.fusion.decision !== "healthy") {
-            void recordEventRef.current({
-              sessionId,
-              timestamp: Math.max(vibration.timestamp, acoustic.timestamp),
-              state: frame.fusion.state,
-              decision: frame.fusion.decision,
-              vibrationIndicator: frame.vibration.anomaly.anomalyIndicator,
-              acousticIndicator: frame.acoustic.anomaly.anomalyIndicator,
-              sensorAgreement: frame.fusion.sensorAgreement,
-              machineMode: frame.machineMode,
-              simulated: true,
-              headline: frame.investigation.headline,
-              narrative: frame.investigation.narrative,
-            });
+            // Always record a genuine state change; otherwise record at most
+            // one event every EVENT_MIN_GAP_MS.
+            const now = performance.now();
+            const last = lastEventRef.current;
+            if (frame.fusion.state !== last.state || now - last.at >= EVENT_MIN_GAP_MS) {
+              lastEventRef.current = { at: now, state: frame.fusion.state };
+              void recordEventRef.current({
+                sessionId,
+                timestamp: Math.max(vibration.timestamp, acoustic.timestamp),
+                state: frame.fusion.state,
+                decision: frame.fusion.decision,
+                vibrationIndicator: frame.vibration.anomaly.anomalyIndicator,
+                acousticIndicator: frame.acoustic.anomaly.anomalyIndicator,
+                sensorAgreement: frame.fusion.sensorAgreement,
+                machineMode: frame.machineMode,
+                simulated: true,
+                headline: frame.investigation.headline,
+                narrative: frame.investigation.narrative,
+              });
+            }
           }
         }
       } else if (pw === "OFF" && pipelineRef.current) {
