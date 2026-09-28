@@ -29,6 +29,18 @@ export {
 export type { WindowPair, BaselineBundle } from "./baseline";
 export { fitPca, projectPca } from "./pca";
 export { fuseResults, QUALITY_GATE } from "./fusion";
+export {
+  EdgeTransmitter,
+  DEFAULT_TRANSMITTER_CONFIG,
+  DETAIL_RANK,
+} from "./edge-transmitter";
+export type {
+  DetailLevel,
+  WirePacket,
+  LinkLedger,
+  LedgerEntry,
+  TransmitterConfig,
+} from "./edge-transmitter";
 export { investigate } from "./investigation";
 export { EdgeSensePipeline } from "./pipeline";
 export type {

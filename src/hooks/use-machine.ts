@@ -24,6 +24,7 @@ import {
   STARTUP_STEPS,
   SyntheticSourceAdapter,
   EdgeSensePipeline,
+  EdgeTransmitter,
   trainBaseline,
   serializeBaseline,
   deserializeBaseline,
@@ -35,6 +36,8 @@ import {
   type MachineState,
   type SimulatorConfig,
   type PipelineSnapshot,
+  type LinkLedger,
+  type WirePacket,
 } from "@/core/edgesense";
 import { MachineAudio } from "@/three/machine-audio";
 
@@ -59,6 +62,10 @@ export interface UseMachineApi {
   startupStep: string | null;
   audioAvailable: boolean;
   snapshot: PipelineSnapshot | null;
+  /** Adaptive edge link ledger: what the edge chose to transmit, and what that saved. */
+  link: LinkLedger | null;
+  /** The most recent packet the edge actually put on the wire. */
+  lastPacket: React.MutableRefObject<WirePacket | null>;
   startMotor: () => void;
   stopMotor: () => void;
   setBehaviour: (b: Behaviour) => void;
@@ -89,6 +96,11 @@ export function useMachine(): UseMachineApi {
   const [startupStep, setStartupStep] = useState<string | null>(null);
   const [audioAvailable, setAudioAvailable] = useState(true);
   const [snapshot, setSnapshot] = useState<PipelineSnapshot | null>(null);
+  const [link, setLink] = useState<LinkLedger | null>(null);
+  /** The adaptive edge link: decides what is worth putting on the wire. */
+  const txRef = useRef<EdgeTransmitter | null>(null);
+  /** Last packet the edge chose to transmit, for the link inspector. */
+  const packetRef = useRef<WirePacket | null>(null);
   const [baselineReady, setBaselineReady] = useState(false);
   const [simConfig, setSimConfig] = useState<SimulatorConfig>(
     () => BEHAVIOUR_PROFILES.NORMAL.sim as SimulatorConfig,
@@ -207,7 +219,17 @@ export function useMachine(): UseMachineApi {
         const frame = pipelineRef.current.process(vibration, acoustic);
         if (frame) {
           setSnapshot(pipelineRef.current.snapshot());
-          if (frame.fusion.decision !== "healthy") {
+
+          // Adaptive edge-assisted transmission. The edge decides per window
+          // what is worth putting on the link; the backend only ever receives
+          // what actually was transmitted, so the wire ledger and the stored
+          // history describe the same thing.
+          if (!txRef.current) txRef.current = new EdgeTransmitter();
+          const { packet, ledger } = txRef.current.step(frame);
+          packetRef.current = packet;
+          setLink(ledger);
+
+          if (packet && frame.fusion.decision !== "healthy") {
             // Always record a genuine state change; otherwise record at most
             // one event every EVENT_MIN_GAP_MS.
             const now = performance.now();
@@ -263,6 +285,8 @@ export function useMachine(): UseMachineApi {
     if (powerRef.current === "OFF") return;
     setPower("STOPPING");
     audio.stop();
+    txRef.current?.reset();
+    setLink(null);
     // Allow a slow deceleration (rotor coasts down, sound fades) before OFF.
     startupTimerRef.current = window.setTimeout(() => {
       setPower("OFF");
@@ -297,6 +321,8 @@ export function useMachine(): UseMachineApi {
     startupStep,
     audioAvailable,
     snapshot,
+    link,
+    lastPacket: packetRef,
     startMotor,
     stopMotor,
     setBehaviour,

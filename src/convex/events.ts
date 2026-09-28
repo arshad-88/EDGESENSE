@@ -90,6 +90,33 @@ export const recordEvent = mutation({
   },
 });
 
+/**
+ * Erase every stored event and reset the running totals.
+ *
+ * Deletes in bounded batches rather than collecting the whole table first —
+ * collecting everything to delete it is exactly the pattern that exhausted the
+ * bandwidth allowance in the first place.
+ */
+export const purgeAll = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const BATCH = 64;
+    let events = 0;
+    for (;;) {
+      const batch = await ctx.db.query("edgesenseEvents").take(BATCH);
+      if (batch.length === 0) break;
+      for (const row of batch) await ctx.db.delete(row._id);
+      events += batch.length;
+      if (batch.length < BATCH) break;
+    }
+
+    const counters = await ctx.db.query("edgesenseStats").collect();
+    for (const row of counters) await ctx.db.delete(row._id);
+
+    return { events, counters: counters.length };
+  },
+});
+
 /** Recent events for a session, newest first. */
 export const getSessionEvents = query({
   args: { sessionId: v.string(), limit: v.optional(v.number()) },

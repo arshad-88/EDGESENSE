@@ -10,6 +10,7 @@ import { AnomalySignature } from "@/components/edgesense/AnomalySignature";
 import { InvestigationFlow } from "@/components/edgesense/InvestigationFlow";
 import { TelemetryPanel } from "@/components/edgesense/TelemetryPanel";
 import { WhatIfConsole } from "@/components/edgesense/WhatIfConsole";
+import { EdgeLinkPanel } from "@/components/edgesense/EdgeLinkPanel";
 import { Panel, Tag } from "@/components/edgesense/Panel";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -23,6 +24,7 @@ export default function Dashboard() {
     startupStep,
     audioAvailable,
     snapshot,
+    link,
     startMotor,
     stopMotor,
     setBehaviour,
@@ -142,7 +144,10 @@ export default function Dashboard() {
           onBehaviour={setBehaviour}
         />
 
-        {/* ============ 02 · TELEMETRY ============ */}
+        {/* ============ 02 · EDGE LINK ============ */}
+        <EdgeLinkPanel link={link} />
+
+        {/* ============ 03 · TELEMETRY ============ */}
         <Panel
           index="02"
           title="Live acquisition"
@@ -175,8 +180,8 @@ export default function Dashboard() {
         {/* ============ 03 · INTELLIGENCE ============ */}
         <div className="grid gap-5 lg:grid-cols-2">
           <Panel
-            index="03"
-            title="Behaviour map"
+          index="04"
+          title="Behaviour map"
             hint="Baseline cloud vs live trajectory"
           >
             <BehaviourMap
@@ -189,7 +194,7 @@ export default function Dashboard() {
             />
           </Panel>
           <Panel
-            index="04"
+            index="05"
             title="Sensor fingerprint"
             hint="Per-feature distance from baseline"
           >
@@ -202,7 +207,7 @@ export default function Dashboard() {
 
         {/* ============ 05 · SIGNATURE ============ */}
         <Panel
-          index="05"
+          index="06"
           title="Anomaly signature"
           hint="Feature × time — deviation from the learned baseline"
           actions={
@@ -220,7 +225,7 @@ export default function Dashboard() {
 
         {/* ============ 06 · INVESTIGATION ============ */}
         <Panel
-          index="06"
+          index="07"
           title="Investigation"
           hint="Evidence behind the current verdict"
         >
@@ -235,7 +240,7 @@ export default function Dashboard() {
 
         {/* ============ 07 · WHAT-IF ============ */}
         <Panel
-          index="07"
+          index="08"
           title="What-if simulator"
           hint="Push the machine and watch the whole pipeline respond"
         >
