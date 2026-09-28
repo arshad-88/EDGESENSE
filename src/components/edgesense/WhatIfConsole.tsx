@@ -67,16 +67,11 @@ export function WhatIfConsole({ machine, simConfig, onApply, onReset, onRetrain 
   return (
     <div className="grid gap-5 lg:grid-cols-[1.1fr_1fr]">
       <div>
-        <div className="mb-3 flex items-start justify-between">
-          <div>
-            <h3 className="flex items-center gap-2 text-sm font-semibold">
-              <FlaskConical className="size-4 text-primary" />
-              What-If Machine Simulator
-            </h3>
-            <p className="text-[11px] text-muted-foreground">
-              Push the machine and watch the entire EdgeSense pipeline respond.
-            </p>
-          </div>
+        <div className="mb-3 flex items-center justify-between">
+          <p className="label-tech flex items-center gap-1.5">
+            <FlaskConical className="size-3.5 text-primary" />
+            CONTROLLED INPUT · FULL PIPELINE RESPONSE
+          </p>
           <div className="flex gap-2">
             <button
               onClick={() => {

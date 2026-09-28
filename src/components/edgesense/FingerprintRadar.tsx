@@ -50,13 +50,11 @@ export function FingerprintRadar({ vibration, acoustic }: Props) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="mb-1 flex items-start justify-between">
-        <div>
-          <h3 className="text-sm font-semibold">Machine Behaviour Fingerprint</h3>
-          <p className="text-[11px] text-muted-foreground">
-            Signed deviation per feature — dashed ring = learned baseline
-          </p>
-        </div>
+      {/* No local heading — the panel frame already titles this region. */}
+      <div className="mb-1 flex items-center justify-between">
+        <p className="label-tech">
+          SIGNED DEVIATION PER FEATURE · DASHED RING = BASELINE
+        </p>
         <span
           className={cn(
             "rounded border px-1.5 py-0.5 text-[9px] font-bold tracking-widest",

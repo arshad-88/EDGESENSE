@@ -79,13 +79,11 @@ export function InvestigationFlow({ frame }: Props) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="mb-2 flex items-start justify-between">
-        <div>
-          <h3 className="text-sm font-semibold">Anomaly Investigation</h3>
-          <p className="text-[11px] text-muted-foreground">
-            How EdgeSense turned deviations into a decision · {fmtTimestamp(frame.timestamp)}
-          </p>
-        </div>
+      {/* No local heading — the panel frame already titles this region. */}
+      <div className="mb-2 flex items-center justify-between">
+        <p className="label-tech tnum">
+          DEVIATIONS → DECISION · {fmtTimestamp(frame.timestamp)}
+        </p>
         <span className={cn("rounded px-2 py-1 text-[10px] font-bold tracking-widest", level === "healthy" ? "bg-status-healthy/15 text-status-healthy" : level === "suspicious" ? "bg-status-suspicious/15 text-status-suspicious" : "bg-status-anomaly/15 text-status-anomaly")}>
           {inv.headline}
         </span>

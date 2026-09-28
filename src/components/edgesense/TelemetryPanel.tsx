@@ -118,7 +118,7 @@ export function TelemetryPanel({ frame }: Props) {
 
   return (
     <div className="flex h-full flex-col">
-      <h3 className="mb-2 text-sm font-semibold">Live Machine Telemetry</h3>
+      {/* No local heading — the panel frame already titles this region. */}
       <div className="grid min-h-0 flex-1 gap-3 md:grid-cols-2">
         <Modality
           name="VIBRATION"

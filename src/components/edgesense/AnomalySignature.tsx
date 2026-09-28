@@ -251,13 +251,11 @@ export function AnomalySignature({ rows, valuesByKey, baselinesByKey }: Props) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="mb-2 flex items-start justify-between">
-        <div>
-          <h3 className="text-sm font-semibold">Anomaly Signature</h3>
-          <p className="text-[11px] text-muted-foreground">
-            Time × feature deviation — live spectral field, one column per window
-          </p>
-        </div>
+      {/* No local heading — the panel frame already titles this region. */}
+      <div className="mb-2 flex items-center justify-between">
+        <p className="label-tech">
+          TIME × FEATURE DEVIATION · ONE COLUMN PER WINDOW
+        </p>
         <div className="flex items-center gap-1.5 text-[9px] text-muted-foreground">
           <span>normal</span>
           <span

@@ -82,13 +82,11 @@ export function BehaviourMap({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="mb-1 flex items-start justify-between">
-        <div>
-          <h3 className="text-sm font-semibold">Normal Behaviour Map</h3>
-          <p className="text-[11px] text-muted-foreground">
-            Learned machine operating envelope · 2D PCA projection of feature space
-          </p>
-        </div>
+      {/* No local heading — the panel frame already titles this region. */}
+      <div className="mb-1 flex items-center justify-between">
+        <p className="label-tech">
+          2D PCA PROJECTION · LEARNED OPERATING ENVELOPE
+        </p>
         <div className="flex gap-1">
           {(["ADXL345", "INMP441"] as const).map((s) => (
             <button
@@ -108,7 +106,15 @@ export function BehaviourMap({
       </div>
 
       <div className="relative min-h-0 flex-1">
-        <svg viewBox={`0 0 ${W} ${H}`} className="h-full w-full" role="img" aria-label="Normal behaviour map">
+        <svg
+          viewBox={`0 0 ${W} ${H}`}
+          className="h-full w-full"
+          role="img"
+          aria-label="Normal behaviour map"
+        >
+          {/* polar grid — makes the projection read as a plot, not a void */}
+          <line x1={W / 2} y1={8} x2={W / 2} y2={H - 8} className="stroke-border/40" strokeOpacity={0.3} strokeDasharray="2 6" />
+          <line x1={8} y1={H / 2} x2={W - 8} y2={H / 2} className="stroke-border/40" strokeOpacity={0.3} strokeDasharray="2 6" />
           {/* envelope fill */}
           {view ? (
             <>

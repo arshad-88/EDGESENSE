@@ -242,8 +242,18 @@ export function MachineCenter({
 
       {/* ---------------- control column ---------------- */}
       <div className="flex flex-col gap-4">
-        <div className="rounded-lg border border-border/60 bg-card/50 p-4">
-          <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+        <div className="panel rounded-lg p-4">
+          <span className="corner corner-tl" />
+          <span className="corner corner-tr" />
+          <span className="corner corner-bl" />
+          <span className="corner corner-br" />
+          <p className="label-tech flex items-center gap-1.5">
+            <span
+              className={cn(
+                "size-1.5 rounded-full",
+                running ? "animate-pulse bg-status-healthy" : "bg-muted-foreground",
+              )}
+            />
             {powerLabel}
           </p>
           <button
@@ -267,9 +277,7 @@ export function MachineCenter({
           </button>
 
           <div className="mt-4">
-            <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-              Machine Behaviour
-            </p>
+            <p className="label-tech mb-1.5">MACHINE BEHAVIOUR</p>
             <div className="grid grid-cols-3 gap-1.5">
               {BEHAVIOURS.map((b) => {
                 const active = machine.behaviour === b;
@@ -303,11 +311,13 @@ export function MachineCenter({
         </div>
 
         {/* live metrics from the central state */}
-        <div className="flex-1 rounded-lg border border-border/60 bg-card/50 p-4">
+        <div className="panel flex-1 rounded-lg p-4">
+          <span className="corner corner-tl" />
+          <span className="corner corner-tr" />
+          <span className="corner corner-bl" />
+          <span className="corner corner-br" />
           <div className="mb-3 flex items-center justify-between">
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-              Live Sensor Values
-            </p>
+            <p className="label-tech">LIVE SENSOR VALUES</p>
             {running ? (
               <span className="flex items-center gap-1 text-[9px] tracking-widest text-status-healthy">
                 <Radio className="size-3 animate-pulse" /> STREAMING
@@ -338,9 +348,7 @@ export function MachineCenter({
           <div className="mt-4 border-t border-border/60 pt-3">
             <div className="flex items-end justify-between">
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground">
-                  Fused Anomaly Score
-                </p>
+                <p className="label-tech">FUSED ANOMALY SCORE</p>
                 <p
                   className={cn(
                     "font-mono text-3xl font-bold tabular-nums",
