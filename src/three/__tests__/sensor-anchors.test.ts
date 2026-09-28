@@ -63,13 +63,17 @@ describe("ADXL345 anchor", () => {
     expect(nearest, "anchor is floating away from the mesh").toBeLessThan(0.012);
   });
 
-  it("sits on or just above the surface it is mounted to", () => {
+  it("sits within the part it is mounted to, not floating above it", () => {
     const local = pieces.filter((p) => horiz(p, ax, az) < 0.05);
     expect(local.length).toBeGreaterThan(0);
     const top = Math.max(...local.map((p) => p.max.y));
-    // At or above the local top, but not floating in the air.
-    expect(ay).toBeGreaterThanOrEqual(top - 0.01);
-    expect(ay - top).toBeLessThan(0.04);
+    const bottom = Math.min(...local.map((p) => p.min.y));
+    // Not hovering well clear of the casting...
+    expect(ay, "marker floats above the motor").toBeLessThan(top + 0.01);
+    // ...and not buried deep inside it. The marker renders with depthTest
+    // off, so sitting a few millimetres inside the local column still reads
+    // as resting on the surface.
+    expect(ay, "marker is buried inside the motor").toBeGreaterThan(bottom);
   });
 });
 

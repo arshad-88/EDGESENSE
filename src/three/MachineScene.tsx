@@ -15,7 +15,7 @@
 import { Suspense, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { OrbitControls, ContactShadows, Html } from "@react-three/drei";
+import { OrbitControls, ContactShadows } from "@react-three/drei";
 import * as THREE from "three";
 import type { MachineState } from "@/core/edgesense";
 import { splitRotorFromHousing } from "./split-motor";
@@ -158,6 +158,7 @@ interface SensorAnchorProps {
 /** Cyan vibration rings from the ADXL345 mount + click target. */
 function Adxl345Effect({ stateRef, position, onSelect, selected }: SensorAnchorProps) {
   const group = useRef<THREE.Group>(null);
+  const marker = useRef<THREE.Group>(null);
   const rings = useRef<THREE.Mesh[]>([]);
   const RING_COUNT = 3;
   useFrame((clockInfo) => {
@@ -165,6 +166,9 @@ function Adxl345Effect({ stateRef, position, onSelect, selected }: SensorAnchorP
     const t = clockInfo.clock.elapsedTime;
     const on = s ? s.power === "ON" || s.power === "STARTING" : false;
     const intensity = s ? Math.min(1, s.vibrationRms / 1.5) : 0;
+    // The marker itself is only drawn while the machine is running, so a
+    // standby machine is visually clean.
+    if (marker.current) marker.current.visible = on;
     for (let i = 0; i < RING_COUNT; i++) {
       const ring = rings.current[i];
       if (!ring) continue;
@@ -188,39 +192,26 @@ function Adxl345Effect({ stateRef, position, onSelect, selected }: SensorAnchorP
         onSelect("ADXL345");
       }}
     >
-      {/* Always-visible marker + label. These groups used to be hidden
-          entirely unless the motor was running, so a STANDBY machine showed
-          NO sensor markers and there was no way to tell which physical part
-          was which. Identification must not depend on the power state. */}
-      {/* A flat footprint ring rather than a sphere. A solid ball hovering
-          over the casting read as a loose object floating next to the machine
-          instead of a callout pointing at a part. */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.001, 0]}>
-        <ringGeometry args={[0.013, 0.019, 32]} />
-        <meshBasicMaterial
-          color="#38bdf8"
-          transparent
-          opacity={0.95}
-          side={THREE.DoubleSide}
-          depthTest={false}
-        />
-      </mesh>
-      {/* Exact anchor point — lets the placement be verified at a glance
-          against the part it names. */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.0015, 0]}>
-        <circleGeometry args={[0.005, 20]} />
-        <meshBasicMaterial color="#38bdf8" depthTest={false} />
-      </mesh>
-      {/* Leader line tying the label to the part it names. */}
-      <mesh position={[0, 0.038, 0]}>
-        <boxGeometry args={[0.0022, 0.076, 0.0022]} />
-        <meshBasicMaterial color="#38bdf8" transparent opacity={0.8} depthTest={false} />
-      </mesh>
-      <Html center distanceFactor={1.7} position={[0, 0.086, 0]} zIndexRange={[30, 10]}>
-        <span className="pointer-events-none select-none whitespace-nowrap rounded bg-background/90 px-1.5 py-0.5 text-[10px] font-bold tracking-widest text-sky-300 ring-1 ring-sky-400/60">
-          ADXL345
-        </span>
-      </Html>
+      {/* Marker: a flat footprint ring plus a centre dot, no text label.
+          Boxed name tags were visual clutter on the machine; the sensor is
+          identified by clicking it. Shown only while the machine runs so a
+          standby machine is unannotated. */}
+      <group ref={marker} visible={false}>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.001, 0]}>
+          <ringGeometry args={[0.013, 0.019, 32]} />
+          <meshBasicMaterial
+            color="#38bdf8"
+            transparent
+            opacity={0.95}
+            side={THREE.DoubleSide}
+            depthTest={false}
+          />
+        </mesh>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.0015, 0]}>
+          <circleGeometry args={[0.005, 20]} />
+          <meshBasicMaterial color="#38bdf8" depthTest={false} />
+        </mesh>
+      </group>
       {/* invisible click target over the sensor location */}
       <mesh
         position={[0, 0, 0]}
@@ -248,6 +239,7 @@ function Adxl345Effect({ stateRef, position, onSelect, selected }: SensorAnchorP
 /** Orange acoustic ripples from the INMP441 position + click target. */
 function Inmp441Effect({ stateRef, position, onSelect, selected }: SensorAnchorProps) {
   const group = useRef<THREE.Group>(null);
+  const marker = useRef<THREE.Group>(null);
   const rings = useRef<THREE.Mesh[]>([]);
   const RING_COUNT = 3;
   useFrame((clockInfo) => {
@@ -255,6 +247,7 @@ function Inmp441Effect({ stateRef, position, onSelect, selected }: SensorAnchorP
     const t = clockInfo.clock.elapsedTime;
     const on = s ? s.power === "ON" || s.power === "STARTING" : false;
     const intensity = s ? Math.min(1, s.acousticLevel / 90) : 0;
+    if (marker.current) marker.current.visible = on;
     for (let i = 0; i < RING_COUNT; i++) {
       const ring = rings.current[i];
       if (!ring) continue;
@@ -276,30 +269,23 @@ function Inmp441Effect({ stateRef, position, onSelect, selected }: SensorAnchorP
         onSelect("INMP441");
       }}
     >
-      {/* Always-visible marker + label — see the note on the ADXL345 group. */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.001, 0]}>
-        <ringGeometry args={[0.013, 0.019, 32]} />
-        <meshBasicMaterial
-          color="#fb923c"
-          transparent
-          opacity={0.95}
-          side={THREE.DoubleSide}
-          depthTest={false}
-        />
-      </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.0015, 0]}>
-        <circleGeometry args={[0.005, 20]} />
-        <meshBasicMaterial color="#fb923c" depthTest={false} />
-      </mesh>
-      <mesh position={[0, 0.038, 0]}>
-        <boxGeometry args={[0.0022, 0.076, 0.0022]} />
-        <meshBasicMaterial color="#fb923c" transparent opacity={0.8} depthTest={false} />
-      </mesh>
-      <Html center distanceFactor={1.7} position={[0, 0.086, 0]} zIndexRange={[30, 10]}>
-        <span className="pointer-events-none select-none whitespace-nowrap rounded bg-background/90 px-1.5 py-0.5 text-[10px] font-bold tracking-widest text-orange-300 ring-1 ring-orange-400/60">
-          INMP441
-        </span>
-      </Html>
+      {/* Ring + centre dot only — see the note on the ADXL345 group. */}
+      <group ref={marker} visible={false}>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.001, 0]}>
+          <ringGeometry args={[0.013, 0.019, 32]} />
+          <meshBasicMaterial
+            color="#fb923c"
+            transparent
+            opacity={0.95}
+            side={THREE.DoubleSide}
+            depthTest={false}
+          />
+        </mesh>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.0015, 0]}>
+          <circleGeometry args={[0.005, 20]} />
+          <meshBasicMaterial color="#fb923c" depthTest={false} />
+        </mesh>
+      </group>
       {/* invisible click target over the sensor location */}
       <mesh
         position={[0, 0, 0]}
