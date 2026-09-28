@@ -28,7 +28,7 @@ import {
 import { extractFeatures } from "./features";
 import type { SpectrumResult } from "./dsp";
 import { IsolationForest } from "./isolation-forest";
-import type { BaselineBundle } from "./baseline";
+import type { BaselineBundle, WindowPair } from "./baseline";
 import { fuseResults } from "./fusion";
 import { investigate } from "./investigation";
 import { clamp } from "./rng";
@@ -238,6 +238,43 @@ export class EdgeSensePipeline {
 
   /** Seed the behaviour cloud with training-data projections. */
   seedCloudBaseline(points: CloudPoint[]): void {
+    this.cloudBaseline = points.slice(-CLOUD_BASELINE_LIMIT);
+  }
+
+  /**
+   * Seed the behaviour cloud by projecting a training corpus through the
+   * fitted PCA.
+   *
+   * This has to be callable on the RESTORE path, not just after training.
+   * Previously the cloud was only seeded when the baseline was trained from
+   * scratch, so as soon as a model was restored from the backend the baseline
+   * cloud was empty and the behaviour map sat on "learning envelope…" forever.
+   * The training corpus is deterministic, so it can simply be regenerated and
+   * re-projected through the restored PCA.
+   */
+  seedCloudFromCorpus(corpus: readonly WindowPair[]): void {
+    if (!this.bundle) return;
+    const points: CloudPoint[] = [];
+    for (const pair of corpus) {
+      for (const [window, sensor] of [
+        [pair.vibration, "ADXL345"],
+        [pair.acoustic, "INMP441"],
+      ] as const) {
+        const pca = this.bundle.pca[sensor];
+        if (!pca) continue;
+        const { features } = extractFeatures(window);
+        const x = FEATURE_VECTOR_ORDER.map((f) => features.values[f]);
+        const { pc1, pc2 } = projectSafe(pca, x);
+        points.push({
+          pc1,
+          pc2,
+          kind: "baseline",
+          sensor,
+          timestamp: features.timestamp,
+          isAnomaly: false,
+        });
+      }
+    }
     this.cloudBaseline = points.slice(-CLOUD_BASELINE_LIMIT);
   }
 

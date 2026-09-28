@@ -28,10 +28,7 @@ import {
   trainBaseline,
   serializeBaseline,
   deserializeBaseline,
-  FEATURE_VECTOR_ORDER,
-  extractFeatures,
   fitPca,
-  projectPca,
   type Behaviour,
   type MachineState,
   type SimulatorConfig,
@@ -142,37 +139,20 @@ export function useMachine(): UseMachineApi {
           restored = false;
         }
       }
-      if (!restored) {
-        const corpus = [];
-        for (let i = 0; i < TRAINING_WINDOWS; i++) corpus.push(src.readWindow());
+
+      // The training corpus is deterministic (fixed seed + NORMAL profile), so
+      // it can be regenerated on the restore path as well. Without this the
+      // behaviour cloud was only ever seeded when training from scratch, and
+      // every later session showed an empty map stuck on "learning envelope…".
+      const corpus = [];
+      for (let i = 0; i < TRAINING_WINDOWS; i++) corpus.push(src.readWindow());
+
+      if (restored) {
+        pipeline.seedCloudFromCorpus(corpus);
+      } else {
         const bundle = trainBaseline(corpus);
         pipeline.setBaseline(bundle);
-        // Seed the behaviour cloud with the training corpus projections.
-        const pcaBundle = bundle as unknown as {
-          pca: Record<string, { mean: number[]; components: number[][] } | null>;
-        };
-        const points = [];
-        for (const pair of corpus) {
-          for (const [w, sensor] of [
-            [pair.vibration, "ADXL345"],
-            [pair.acoustic, "INMP441"],
-          ] as const) {
-            const pca = pcaBundle.pca[sensor];
-            if (!pca) continue;
-            const { features } = extractFeatures(w as never);
-            const x = FEATURE_VECTOR_ORDER.map((f) => features.values[f]);
-            const { pc1, pc2 } = projectPca(pca as never, x);
-            points.push({
-              pc1,
-              pc2,
-              kind: "baseline" as const,
-              sensor: sensor as never,
-              timestamp: features.timestamp,
-              isAnomaly: false,
-            });
-          }
-        }
-        pipeline.seedCloudBaseline(points);
+        pipeline.seedCloudFromCorpus(corpus);
         void saveModel({
           trainedAt: bundle.metadata.trainedAt,
           sampleCount: bundle.metadata.sampleCountPerSensor,

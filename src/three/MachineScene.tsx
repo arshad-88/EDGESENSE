@@ -196,14 +196,20 @@ function Adxl345Effect({ stateRef, position, onSelect, selected }: SensorAnchorP
           over the casting read as a loose object floating next to the machine
           instead of a callout pointing at a part. */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.001, 0]}>
-        <ringGeometry args={[0.012, 0.018, 32]} />
+        <ringGeometry args={[0.013, 0.019, 32]} />
         <meshBasicMaterial
           color="#38bdf8"
           transparent
-          opacity={0.85}
+          opacity={0.95}
           side={THREE.DoubleSide}
           depthTest={false}
         />
+      </mesh>
+      {/* Exact anchor point — lets the placement be verified at a glance
+          against the part it names. */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.0015, 0]}>
+        <circleGeometry args={[0.005, 20]} />
+        <meshBasicMaterial color="#38bdf8" depthTest={false} />
       </mesh>
       {/* Leader line tying the label to the part it names. */}
       <mesh position={[0, 0.038, 0]}>
@@ -272,14 +278,18 @@ function Inmp441Effect({ stateRef, position, onSelect, selected }: SensorAnchorP
     >
       {/* Always-visible marker + label — see the note on the ADXL345 group. */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.001, 0]}>
-        <ringGeometry args={[0.012, 0.018, 32]} />
+        <ringGeometry args={[0.013, 0.019, 32]} />
         <meshBasicMaterial
           color="#fb923c"
           transparent
-          opacity={0.85}
+          opacity={0.95}
           side={THREE.DoubleSide}
           depthTest={false}
         />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.0015, 0]}>
+        <circleGeometry args={[0.005, 20]} />
+        <meshBasicMaterial color="#fb923c" depthTest={false} />
       </mesh>
       <mesh position={[0, 0.038, 0]}>
         <boxGeometry args={[0.0022, 0.076, 0.0022]} />
@@ -421,10 +431,18 @@ export function MachineScene({
         style={{ background: "transparent" }}
         onPointerMissed={() => onSelectSensor?.(null)}
       >
+        {/* Lighting is deliberately NEUTRAL. It used to be tinted with the
+            sensor accent colours (cyan #38bdf8 and amber #fb923c), which put
+            saturated cyan and orange specular highlights on the dark glossy
+            casting. Those highlights were indistinguishable from the sensor
+            markers — a cyan blob on the pump flange read as "the ADXL345 is
+            over there", which is exactly how the marker positions were
+            reported as wrong when they were correct. Keep the scene lights
+            colourless so no light can ever imitate a marker. */}
         <ambientLight intensity={0.35} />
-        <directionalLight position={[2, 3, 2]} intensity={1.4} color="#e2e8f0" />
-        <directionalLight position={[-2, 1, -1]} intensity={0.5} color="#38bdf8" />
-        <directionalLight position={[0, -2, 1]} intensity={0.25} color="#fb923c" />
+        <directionalLight position={[2, 3, 2]} intensity={1.4} color="#e6ebf2" />
+        <directionalLight position={[-2, 1, -1]} intensity={0.5} color="#ccd6e0" />
+        <directionalLight position={[0, -2, 1]} intensity={0.25} color="#d8dde4" />
         <Suspense fallback={null}>
           <MotorAssembly
             stateRef={stateRef}
