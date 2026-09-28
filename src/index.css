@@ -208,6 +208,36 @@
   /* Tabular readouts so numbers don't jitter as they update. */
   .tnum { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
 
+  /* ---- HUD instrumentation ------------------------------------------ */
+
+  /* Slow vertical sweep across the viewport, like a radar refresh. */
+  .hud-sweep::after {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    height: 22%;
+    top: -22%;
+    pointer-events: none;
+    background: linear-gradient(
+      to bottom,
+      transparent,
+      oklch(0.8 0.15 195 / 0.07),
+      transparent
+    );
+    animation: hud-sweep 7.5s linear infinite;
+  }
+
+  /* Fine scanlines over the viewport. */
+  .hud-scanlines {
+    background-image: repeating-linear-gradient(
+      to bottom,
+      oklch(1 0 0 / 0.022) 0px,
+      oklch(1 0 0 / 0.022) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+  }
+
   /* Status accents */
   .text-status-healthy { color: var(--status-healthy); }
   .text-status-suspicious { color: var(--status-suspicious); }
@@ -215,4 +245,14 @@
   .bg-status-healthy { background-color: var(--status-healthy); }
   .bg-status-suspicious { background-color: var(--status-suspicious); }
   .bg-status-anomaly { background-color: var(--status-anomaly); }
+}
+
+/* HUD sweep animation — sits outside @layer so the keyframes are global. */
+@keyframes hud-sweep {
+  0%   { top: -25%; }
+  100% { top: 105%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hud-sweep::after { animation: none; opacity: 0; }
 }

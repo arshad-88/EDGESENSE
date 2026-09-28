@@ -1,26 +1,40 @@
 /**
  * Where each sensor physically sits on the machine.
  *
- * Every value here was MEASURED from `public/motor.glb` by decomposing the
- * mesh into its connected components, not chosen by eye. They are asserted
- * against the real geometry in `__tests__/sensor-anchors.test.ts`, so if an
- * anchor is ever moved onto a neighbouring part the test suite fails.
+ * ── How these were derived ─────────────────────────────────────────────
+ * Earlier revisions of this file were wrong because they assumed the motor
+ * occupied negative X. That assumption was never verified, and it was
+ * backwards.
  *
- *   ADXL345 — 3-axis accelerometer, bolted to the top of the motor housing at
- *             the drive end (negative X). The motor's top deck there reaches
- *             y = 0.179, so the marker sits just clear of the casting rather
- *             than inside it.
- *   INMP441  — MEMS microphone: a ~14 x 15 x 11 mm spherical head centred at
- *             (0.131, 0.225, 0.086), carried on a thin 8 x 63 mm vertical
- *             post (0.121–0.129, 0.140–0.203, 0.073–0.081) that stands well
- *             above the pump deck, between the motor and the coupling guard.
+ * These values come from *solving for the render camera*. The previous anchors
+ * are placed by the app at known model coordinates, so their rendered pixels
+ * are ground truth: fitting azimuth / distance / height / scale to two observed
+ * marker positions reproduces them to within 0.001 of the image width
+ * (rms 0.0008). That camera was then used to project every mesh component and
+ * find which ones land where the sensors appear in the annotated screenshot.
  *
- * Kept in its own module (no React/three imports) so the test can import the
- * anchors without pulling in the whole scene.
+ * The fit settled the orientation definitively:
+ *
+ *     +X projects to screen LEFT  →  the MOTOR is at positive X
+ *                                     the PUMP  is at negative X
+ *                                     the yellow coupling guard sits at x ≈ 0.01
+ *
+ * ── The parts ──────────────────────────────────────────────────────────
+ * ADXL345 — 3-axis accelerometer bolted on top of the motor housing. Its mount
+ *           spans x ≈ 0.27–0.38, z ≈ 0.055–0.085 and tops out at y = 0.1807,
+ *           so the marker sits a few millimetres clear of that top face.
+ *
+ * INMP441 — MEMS microphone on the pump side: a ~34 mm near-spherical head
+ *           (sphericity 1.22) centred at (−0.250, 0.111, −0.031), top at
+ *           y = 0.133, carried on a 26 × 63 mm stem below it. Projects to
+ *           within 0.002 of the annotated position.
+ *
+ * Both sit on the TOP surface of the part each one names, so the marker reads
+ * as a reticle on that component rather than floating near it.
  */
 export type SensorId = "ADXL345" | "INMP441";
 
 export const SENSOR_ANCHORS: Record<SensorId, [number, number, number]> = {
-  ADXL345: [-0.420, 0.186, 0.0],
-  INMP441: [0.131, 0.233, 0.086],
+  ADXL345: [0.372, 0.184, 0.07],
+  INMP441: [-0.25, 0.135, -0.031],
 };

@@ -91,6 +91,35 @@ export function MachineCenter({
         className="relative overflow-hidden rounded-lg border border-border/60 bg-[radial-gradient(ellipse_at_50%_115%,rgba(56,189,248,0.10),transparent_55%),radial-gradient(ellipse_at_85%_0%,rgba(251,146,60,0.06),transparent_50%)] bg-card"
       >
         <div className="absolute inset-0 bg-grid opacity-30" />
+
+        {/* ---- HUD instrumentation over the viewport ---- */}
+        <div className="hud-sweep pointer-events-none absolute inset-0 overflow-hidden" />
+        <div className="hud-scanlines pointer-events-none absolute inset-0 opacity-60" />
+        <div className="pointer-events-none absolute inset-0">
+          <span className="corner corner-tl" />
+          <span className="corner corner-tr" />
+          <span className="corner corner-bl" />
+          <span className="corner corner-br" />
+        </div>
+        {/* Reticle ticks on the horizontal centre line. */}
+        <div className="pointer-events-none absolute left-0 top-1/2 flex -translate-y-1/2 flex-col gap-1.5 pl-2">
+          {[0, 1, 2].map((i) => (
+            <span
+              key={i}
+              className="block h-px bg-primary/25"
+              style={{ width: i === 1 ? 14 : 8 }}
+            />
+          ))}
+        </div>
+        <div className="pointer-events-none absolute right-0 top-1/2 flex -translate-y-1/2 flex-col items-end gap-1.5 pr-2">
+          {[0, 1, 2].map((i) => (
+            <span
+              key={i}
+              className="block h-px bg-primary/25"
+              style={{ width: i === 1 ? 14 : 8 }}
+            />
+          ))}
+        </div>
         <MachineScene
           stateRef={machineRef}
           className={isFullscreen ? "h-screen w-screen" : "relative h-[460px] w-full xl:h-[540px]"}
