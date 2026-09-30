@@ -1,42 +1,55 @@
 /**
  * ParticleUniverse — the EdgeSense particle engine.
  *
- * ── What is actually simulated ────────────────────────────────────────────
- * One BufferGeometry, one ShaderMaterial and a per-particle CPU integrator.
- * Every particle owns a position, a velocity, a target, a tint, a depth layer
- * and a seed, so the field is genuinely pushed around instead of being
- * imitated inside a vertex shader:
+ * Two co-located point systems in one canvas, sharing one layout transform, one
+ * cursor force field and one camera:
  *
- *   target = mix(emblemTarget, machineTarget, morph)     scroll: emblem → machine
- *          + scatter * dispersion                        scroll: dissolve outward
- *          + noise                                       always: subtle life
+ * 1. THE MACHINE — a dense point cloud sampled from the real GLB surface.
+ *    The machine is not a mesh and it is not a picture. `loadMachineCloud()`
+ *    loads `public/motor.glb` and `machine-cloud.ts` samples its triangles
+ *    (sub-linearly area-weighted, barycentric inside the picked triangle) into
+ *    tens of thousands of typed-array particle targets:
  *
- *   velocity += (target - position) * spring * dt        spring attraction
- *   velocity *= exp(-damping * dt)                       settle with overshoot
- *   velocity += repulsion(cursorForceField)              you can push it
- *   position += velocity * dt
+ *      GLB → surface samples → THREE.Points targets
  *
- * So the mark scatters under the cursor, decays, springs back, overshoots
- * slightly and reforms as the exact EdgeSense emblem — no teleporting, no
- * opacity tricks, no static PNG.
+ *    Those sampled positions ARE the targets, so the machine you see is
+ *    literally the machine geometry. Displacement happens in the vertex shader
+ *    as an offset from those positions: a real radial cursor force field, a
+ *    scroll-driven dispersion, and an assembly ramp — all pure functions of
+ *    the pointer and scroll state, which makes them exactly reversible. Nothing
+ *    teleports, nothing dissolves into a flat image, and the particle machine
+ *    always springs back onto the GLB-derived positions.
  *
- * ── The mark ─────────────────────────────────────────────────────────────
- * `./emblem` defines the brand mark as pure geometry (unit-tested, no GPU
- * needed): a vibration-drawn letter E locked inside a motor-core stator ring,
- * fed by a blue vibration ribbon and radiating orange acoustic arcs.
+ * 2. THE MARK — the EdgeSense emblem, per-particle CPU integration, so it can
+ *    be genuinely shoved around: a cursor push, a scatter, an underdamped
+ *    spring return (it overshoots, then settles) and a scroll dispersion that
+ *    doubles as the dissolve into the machine.
  *
- * ── The machine ──────────────────────────────────────────────────────────
- * As scroll progress completes, the same particles abandon the emblem and
- * settle onto the real GLB surface. Density and brightness fall over the
- * transition and the field splits into background / midground / foreground
- * layers, so the machine — not the effect — is what you look at.
+ *    velocity += (target - position) * spring * dt        spring attraction
+ *    velocity *= exp(-damping * dt)                       settle with overshoot
+ *    velocity += repulsion(cursorForceField)              you can push it
+ *    position += velocity * dt
+ *
+ * `./emblem` defines the mark as pure geometry (unit-tested, no GPU needed): a
+ * vibration-drawn letter E locked inside a motor-core stator ring, fed by a
+ * blue vibration ribbon and radiating orange acoustic arcs.
+ *
+ * Colour follows the reference art direction: cool machine steel in the middle,
+ * blue vibration energy bleeding off the pump end, orange acoustic arcs
+ * radiating off the motor/fan end, and a dim mirrored reflection of the real
+ * silhouette under the base plate.
  */
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import * as THREE from "three";
-import { SENSOR_ANCHORS } from "./sensor-anchors";
-import { BLUE_SHARE, OBJ_W, ORANGE_SHARE, buildEmblem, rnd, smoothstep } from "./emblem";
+import { OBJ_W, buildEmblem, smoothstep } from "./emblem";
+import {
+  bakeMachineGeometry,
+  buildMachineCloud,
+  type MachineAsset,
+  type MachineCloud,
+} from "./machine-cloud";
 
 export interface UniverseState {
   power: string;
@@ -59,22 +72,23 @@ export interface ParticleUniverseProps {
 
 const GLB_URL = "/motor.glb";
 
-/** Adaptive budget — modest hardware gets a lighter field. */
-const COUNT =
-  typeof navigator !== "undefined" && (navigator.hardwareConcurrency ?? 8) <= 4
-    ? 2200
-    : 4000;
+const LIGHT_TIER =
+  typeof navigator !== "undefined" && (navigator.hardwareConcurrency ?? 8) <= 4;
+
+/** The interactive CPU-integrated mark: modest hardware gets a lighter field. */
+const EMBLEM_COUNT = LIGHT_TIER ? 2200 : 4000;
+
+/**
+ * The machine point cloud lives entirely on the GPU (the vertex shader does the
+ * displacement), so it can be an order of magnitude denser than the CPU field.
+ * This is the "tens/hundreds of thousands of particle positions" budget.
+ */
+const MACHINE_COUNT = LIGHT_TIER ? 60000 : 130000;
 
 /* ------------------------------ the machine ------------------------------- */
 
-interface MachineAsset {
-  geometry: THREE.BufferGeometry;
-  positions: Float32Array;
-  adxl: [number, number, number];
-  inmp: [number, number, number];
-}
-
 let cachedAsset: MachineAsset | null = null;
+let cachedCloud: MachineCloud | null = null;
 
 function firstMesh(root: THREE.Object3D): THREE.Mesh | null {
   let found: THREE.Mesh | null = null;
@@ -92,76 +106,16 @@ async function loadMachineAsset(): Promise<MachineAsset> {
   const mesh = firstMesh(gltf.scene);
   if (!mesh) throw new Error("no mesh in machine GLB");
 
-  // Bake the machine into the same object space as the emblem: centred, and
-  // normalised to the same width, so one layout transform frames both.
-  const geometry = mesh.geometry.clone();
-  geometry.computeBoundingBox();
-  const bb = geometry.boundingBox as THREE.Box3;
-  const center = bb.getCenter(new THREE.Vector3());
-  const size = bb.getSize(new THREE.Vector3());
-  const k = OBJ_W / Math.max(size.x, 1e-4);
-  geometry.translate(-center.x, -center.y, -center.z);
-  geometry.scale(k, k, k);
-  geometry.computeVertexNormals();
-
-  const bake = (a: readonly number[]): [number, number, number] => [
-    (a[0] - center.x) * k,
-    (a[1] - center.y) * k,
-    (a[2] - center.z) * k,
-  ];
-
-  cachedAsset = {
-    geometry,
-    positions: (geometry.getAttribute("position") as THREE.BufferAttribute).array as Float32Array,
-    adxl: bake(SENSOR_ANCHORS.ADXL345),
-    inmp: bake(SENSOR_ANCHORS.INMP441),
-  };
+  cachedAsset = bakeMachineGeometry(mesh.geometry);
   return cachedAsset;
 }
 
-/** Machine-side targets: surface for the body, tight clusters for the sensors. */
-function buildShellTargets(asset: MachineAsset, count: number, layer: Float32Array): Float32Array {
-  const targets = new Float32Array(count * 3);
-  const verts = asset.positions.length / 3;
-  const blueEnd = Math.round(count * BLUE_SHARE);
-  const orangeEnd = blueEnd + Math.round(count * ORANGE_SHARE);
-
-  for (let i = 0; i < count; i++) {
-    const i3 = i * 3;
-    const h = rnd(i, 11);
-    const h2 = rnd(i, 12);
-    if (i < blueEnd) {
-      // blue particles gather on the real ADXL345 mount
-      targets[i3] = asset.adxl[0] + (h - 0.5) * 0.34;
-      targets[i3 + 1] = asset.adxl[1] + (h2 - 0.5) * 0.24;
-      targets[i3 + 2] = asset.adxl[2] + (rnd(i, 13) - 0.5) * 0.34;
-    } else if (i < orangeEnd) {
-      targets[i3] = asset.inmp[0] + (h - 0.5) * 0.36;
-      targets[i3 + 1] = asset.inmp[1] + (h2 - 0.5) * 0.26 + 0.12;
-      targets[i3 + 2] = asset.inmp[2] + (rnd(i, 13) - 0.5) * 0.36;
-    } else {
-      const vi = Math.floor(h * verts);
-      targets[i3] = asset.positions[vi * 3] + (h2 - 0.5) * 0.03;
-      targets[i3 + 1] = asset.positions[vi * 3 + 1] + (rnd(i, 13) - 0.5) * 0.03;
-      targets[i3 + 2] = asset.positions[vi * 3 + 2] + (rnd(i, 14) - 0.5) * 0.03;
-    }
-  }
-
-  // Depth hierarchy. The machine must dominate, so most of the field falls
-  // behind it as dim dust and only a handful of particles come forward.
-  for (let i = 0; i < count; i++) {
-    const i3 = i * 3;
-    if (layer[i] === 0) {
-      targets[i3] *= 1.7;
-      targets[i3 + 1] = targets[i3 + 1] * 1.7 + 0.35;
-      targets[i3 + 2] -= 4.2;
-    } else if (layer[i] === 2) {
-      targets[i3] *= 1.32;
-      targets[i3 + 1] *= 1.32;
-      targets[i3 + 2] += 2.4;
-    }
-  }
-  return targets;
+/** One cached sample of the GLB, reused by every mount of the field. */
+async function loadMachineCloud(count: number): Promise<MachineCloud> {
+  if (cachedCloud) return cachedCloud;
+  const asset = await loadMachineAsset();
+  if (!cachedCloud) cachedCloud = buildMachineCloud(asset, count);
+  return cachedCloud;
 }
 
 /* ------------------------------- shaders --------------------------------- */
@@ -190,12 +144,12 @@ void main() {
   float layerSize  = aLayer < 0.5 ? 0.62 : (aLayer < 1.5 ? 1.0 : 1.85);
   float twinkle = 0.86 + 0.14 * sin(uTime * (0.65 + aSeed.y) + aSeed.z * 32.0);
 
-  // The machine phase dims and shrinks the whole field: it supports the
-  // machine, it never competes with it.
-  float machineDim = mix(1.0, 0.48, uMachine);
+  // The machine phase melts the mark away: the point-cloud machine is the
+  // subject from here on, so the emblem only survives as ambient dust.
+  float machineDim = mix(1.0, 0.12, uMachine);
 
   vAlpha = layerAlpha * depthFade * twinkle * machineDim * uCalm;
-  gl_PointSize = aSize * layerSize * uPixelScale * mix(1.0, 0.82, uMachine)
+  gl_PointSize = aSize * layerSize * uPixelScale * mix(1.0, 0.7, uMachine)
     / max(-mv.z, 0.5);
 
   vec3 white  = vec3(0.70, 0.78, 0.90);
@@ -225,6 +179,119 @@ void main() {
 }
 `;
 
+/**
+ * The machine point cloud. `position` IS the sampled GLB surface position, so
+ * every displacement below is an *offset* that naturally collapses back to the
+ * real geometry — the machine cannot end up somewhere it never was, and the
+ * cursor/scroll state is the only thing that ever moves it.
+ */
+const MACHINE_VERT = /* glsl */ `
+attribute vec3  aScatter;
+attribute float aAmp;
+attribute float aSize;
+attribute float aKind;   // 0 body · 1 floor · 2 blue · 3 orange
+attribute vec3  aSeed;
+
+uniform float uTime;
+uniform float uEnergy;
+uniform float uAnomaly;
+uniform float uReveal;       // 0 not yet formed .. 1 assembled on the GLB surface
+uniform float uDispersion;   // scroll-driven outward release (reversible)
+uniform float uCalm;
+uniform float uPixelScale;
+uniform float uPointerStrength;
+uniform float uPointerRadius;
+uniform vec3  uPointer;      // object-space cursor
+
+varying float vAlpha;
+varying vec3  vColor;
+
+void main() {
+  // ---- the GLB-derived home position ----
+  vec3 pos = position;
+
+  // ---- scroll dispersion + assembly: particles hang along their own scatter
+  //      direction while the machine is unformed and fly home as reveal -> 1.
+  //      Both terms are pure functions of the scroll progress, so scrolling
+  //      back up returns every particle to its sampled position. ----
+  float away = pow(max(0.0, 1.0 - uReveal), 1.7);
+  pos += aScatter * (aAmp * (uDispersion + away * 1.35));
+
+  // ---- cursor force field: a real radial push, not an opacity trick ----
+  vec3 d = pos - uPointer;
+  d.z *= 0.55;
+  float dist = length(d) + 1e-4;
+  float f = 1.0 - dist / uPointerRadius;
+  if (f > 0.0 && uPointerStrength > 0.0) {
+    float gain = 0.45 + aSeed.y * 0.75;      // some particles barely register it
+    pos += normalize(d) * (f * f * uPointerStrength * gain * 0.34);
+  }
+
+  // ---- running machine: a fine synchronous shimmer over the body ----
+  pos += vec3(0.0, sin(uTime * 46.0 + aSeed.x * 24.0), 0.0)
+    * uEnergy * 0.004 * (aKind < 0.5 ? 1.0 : 0.35);
+
+  vec4 mv = modelViewMatrix * vec4(pos, 1.0);
+
+  // depth shading: the far side of the sampled shell reads darker, which is
+  // what makes a hollow point cloud look like a solid volume
+  float near = smoothstep(-11.0, -5.5, mv.z);
+  float appear = smoothstep(0.04, 0.5, uReveal);
+  float base = aKind < 0.5 ? 0.38 : (aKind < 1.5 ? 0.15 : 0.5);
+  float depthFade = aKind < 1.5 ? mix(0.4, 1.0, near) : mix(0.72, 1.0, near);
+  float twinkle = 0.82 + 0.18 * sin(uTime * (0.8 + aSeed.y * 1.6) + aSeed.z * 40.0);
+
+  vAlpha = base * appear * twinkle * depthFade * uCalm;
+
+  // ---- colour: cool steel in the middle, blue at the pump, orange at the fan ----
+  float side = clamp(position.x / 1.4, -1.0, 1.0);
+  vec3 steel = vec3(0.60, 0.70, 0.88);
+  vec3 bodyCol = side < 0.0
+    ? mix(steel, vec3(0.22, 0.60, 1.00), -side * 0.8)
+    : mix(steel, vec3(1.00, 0.60, 0.26), side * 0.62);
+
+  vec3 blue = vec3(0.24, 0.62, 1.00);
+  vec3 orange = vec3(1.00, 0.55, 0.20);
+  vec3 col;
+  if (aKind < 0.5) col = bodyCol;
+  else if (aKind < 1.5) col = bodyCol * 0.75;
+  else if (aKind < 2.5) col = blue;
+  else col = orange;
+
+  col *= mix(0.85, 1.3, uEnergy);
+  col = mix(col, vec3(1.0, 0.30, 0.18), uAnomaly * step(0.82, aSeed.y) * 0.75);
+  vColor = col;
+
+  float kindSize = aKind < 0.5 ? 1.0 : (aKind < 1.5 ? 0.7 : 1.2);
+  gl_PointSize = clamp(aSize * kindSize * uPixelScale / max(-mv.z, 0.5), 0.85, 9.0);
+  gl_Position = projectionMatrix * mv;
+}
+`;
+
+const MACHINE_FRAG = /* glsl */ `
+varying float vAlpha;
+varying vec3  vColor;
+void main() {
+  vec2 c = gl_PointCoord - 0.5;
+  float d = length(c);
+  float a = smoothstep(0.5, 0.12, d);
+  float core = smoothstep(0.17, 0.0, d);
+  gl_FragColor = vec4(vColor + core * 0.5, a * vAlpha);
+}
+`;
+
+function buildMachineGeometry(cloud: MachineCloud): THREE.BufferGeometry {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.BufferAttribute(cloud.home, 3));
+  g.setAttribute("aScatter", new THREE.BufferAttribute(cloud.scatter, 3));
+  g.setAttribute("aAmp", new THREE.BufferAttribute(cloud.amp, 1));
+  g.setAttribute("aSize", new THREE.BufferAttribute(cloud.size, 1));
+  g.setAttribute("aKind", new THREE.BufferAttribute(cloud.kind, 1));
+  g.setAttribute("aSeed", new THREE.BufferAttribute(cloud.seed, 3));
+  g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), OBJ_W * 1.4);
+  return g;
+}
+
 /* ------------------------------- the field -------------------------------- */
 
 function ParticleField({
@@ -237,18 +304,17 @@ function ParticleField({
   calm: boolean;
 }) {
   const groupRef = useRef<THREE.Group>(null);
-  const pointsRef = useRef<THREE.Points>(null);
-  const meshRef = useRef<THREE.Mesh>(null);
 
-  const emblem = useMemo(() => buildEmblem(COUNT), []);
+  const emblem = useMemo(() => buildEmblem(EMBLEM_COUNT), []);
 
   /* simulation state — typed arrays, never React state */
-  const sim = useMemo(() => {
-    const pos: Float32Array = new Float32Array(emblem.home); // starts assembled
-    const vel: Float32Array = new Float32Array(COUNT * 3);
-    const shell: Float32Array = new Float32Array(emblem.home); // replaced once the GLB lands
-    return { pos, vel, shell };
-  }, [emblem]);
+  const sim = useMemo(
+    () => ({
+      pos: new Float32Array(emblem.home),
+      vel: new Float32Array(EMBLEM_COUNT * 3),
+    }),
+    [emblem],
+  );
 
   const geometry = useMemo(() => {
     const g = new THREE.BufferGeometry();
@@ -285,38 +351,62 @@ function ParticleField({
     [uniforms],
   );
 
-  const machineMaterial = useMemo(
-    () =>
-      new THREE.MeshStandardMaterial({
-        color: new THREE.Color("#8d9aa9"),
-        metalness: 0.55,
-        roughness: 0.48,
-        transparent: true,
-        opacity: 0,
-      }),
-    [],
-  );
+  /* --------------------- the point-cloud machine ------------------------- */
+  const [cloud, setCloud] = useState<MachineCloud | null>(null);
 
-  /* -------------------------- load the machine --------------------------- */
   useEffect(() => {
     let dead = false;
-    loadMachineAsset()
-      .then((asset) => {
-        if (dead) return;
-        sim.shell = buildShellTargets(asset, COUNT, emblem.layer);
-        if (meshRef.current) meshRef.current.geometry = asset.geometry;
+    loadMachineCloud(MACHINE_COUNT)
+      .then((c) => {
+        if (!dead) setCloud(c);
       })
-      .catch((e) => console.warn("[EdgeSense] machine targets unavailable:", e));
+      .catch((e) => console.warn("[EdgeSense] machine point cloud unavailable:", e));
     return () => {
       dead = true;
     };
-  }, [sim, emblem]);
+  }, []);
+
+  const machineGeometry = useMemo(
+    () => (cloud ? buildMachineGeometry(cloud) : null),
+    [cloud],
+  );
+
+  const machineUniforms = useMemo(
+    () => ({
+      uTime: { value: 0 },
+      uEnergy: { value: 0 },
+      uAnomaly: { value: 0 },
+      uReveal: { value: 0 },
+      uDispersion: { value: 0 },
+      uCalm: { value: calm ? 0.5 : 1 },
+      uPixelScale: { value: 900 },
+      uPointerStrength: { value: 0 },
+      uPointerRadius: { value: 0.62 },
+      uPointer: { value: new THREE.Vector3(999, 999, 0) },
+    }),
+    [calm],
+  );
+
+  const machineMaterial = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        uniforms: machineUniforms,
+        vertexShader: MACHINE_VERT,
+        fragmentShader: MACHINE_FRAG,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      }),
+    [machineUniforms],
+  );
 
   /* ------------------------- pointer force field ------------------------- */
   const pointer = useRef({
     ndc: new THREE.Vector2(0, 0),
     lastMove: -1e9,
     inside: false,
+    /** underdamped so a release visibly springs back */
+    spring: { s: 0, v: 0 },
     strength: 0,
     world: new THREE.Vector3(),
     ray: new THREE.Vector3(),
@@ -370,7 +460,8 @@ function ParticleField({
     // Dispersion peaks in the middle of the scroll: the mark dissolves into
     // data before it reforms as the machine. A pure function of scroll
     // progress, so scrolling back up reverses it exactly.
-    const dispersion = Math.pow(Math.sin(Math.PI * p), 0.75);
+    const scrollDisp = Math.pow(Math.sin(Math.PI * p), 0.75);
+    const assemble = smoothstep(0.22, 0.9, p);
 
     // ---- responsive layout: the object sits beside the copy when wide ----
     const aspect = state.size.width / Math.max(state.size.height, 1);
@@ -396,6 +487,7 @@ function ParticleField({
     uniforms.uAnomaly.value += (anomaly - uniforms.uAnomaly.value) * Math.min(1, dt * 2);
     uniforms.uTime.value = t;
     uniforms.uPixelScale.value = state.size.height * state.gl.getPixelRatio() * 0.78;
+    uniforms.uMachine.value = assemble;
 
     // ---- cursor → object space ----
     const pt = pointer.current;
@@ -404,7 +496,13 @@ function ParticleField({
     // The field calms on its own: stop moving and the push fades, so the mark
     // springs back together without the cursor having to leave the area.
     const active = pt.inside && since < 0.9 ? Math.max(0, 1 - since / 0.9) : 0;
-    pt.strength += (active - pt.strength) * Math.min(1, dt * 4);
+    // Second-order response: the push overshoots slightly on release, which is
+    // what makes the reassembly read as a spring rather than a fade.
+    const sp = pt.spring;
+    sp.v += (active - sp.s) * 42 * dt;
+    sp.v *= Math.exp(-8.2 * dt);
+    sp.s += sp.v * dt;
+    pt.strength = sp.s;
     if (pt.strength > 0.001) {
       // Cursor → the z = 0 plane the object lives on, then into object space.
       pt.ray.set(pt.ndc.x, pt.ndc.y, 0.5).unproject(cam).sub(cam.position).normalize();
@@ -418,8 +516,18 @@ function ParticleField({
     }
     pt.obj.lerp(pt.target, Math.min(1, dt * 12));
 
-    // ---- integrate every particle ----
-    const { pos, vel, shell } = sim;
+    // ---- drive the machine point cloud (all displacement happens on the GPU) ----
+    machineUniforms.uTime.value = t;
+    machineUniforms.uEnergy.value = uniforms.uEnergy.value;
+    machineUniforms.uAnomaly.value = uniforms.uAnomaly.value;
+    machineUniforms.uReveal.value = assemble;
+    machineUniforms.uDispersion.value = scrollDisp * 0.42;
+    machineUniforms.uPixelScale.value = uniforms.uPixelScale.value;
+    machineUniforms.uPointerStrength.value = Math.max(0, pt.strength);
+    machineUniforms.uPointer.value.copy(pt.obj);
+
+    // ---- integrate every particle of the mark ----
+    const { pos, vel } = sim;
     const { home, scatter, scatterAmp, seed } = emblem;
     const damp = Math.exp(-5.0 * dt);
     const noiseAmp = 0.018 + energy * 0.03;
@@ -433,26 +541,19 @@ function ParticleField({
     const MAXV = 12;
     const MAXV2 = MAXV * MAXV;
 
-    let morphSum = 0;
+    // The mark keeps its own scroll dispersion, and additionally melts into the
+    // ambient field as the machine takes over.
+    const dispersion = Math.min(1.4, scrollDisp + assemble * 0.6);
 
-    for (let i = 0; i < COUNT; i++) {
+    for (let i = 0; i < EMBLEM_COUNT; i++) {
       const i3 = i * 3;
       const sx = seed[i3];
       const sy = seed[i3 + 1];
 
-      // Staggered morph: the assembly sweeps across the body.
-      const m = smoothstep(0.3 + sx * 0.26, 0.74 + sy * 0.24, p);
-      morphSum += m;
-
-      const hx = home[i3];
-      const hy = home[i3 + 1];
-      const hz = home[i3 + 2];
-
-      // ---- target: emblem → machine, displaced outward by scroll ----
       const d = dispersion * scatterAmp[i];
-      let tx = hx + (shell[i3] - hx) * m + scatter[i3] * d;
-      let ty = hy + (shell[i3 + 1] - hy) * m + scatter[i3 + 1] * d;
-      let tz = hz + (shell[i3 + 2] - hz) * m + scatter[i3 + 2] * d;
+      let tx = home[i3] + scatter[i3] * d;
+      let ty = home[i3 + 1] + scatter[i3 + 1] * d;
+      let tz = home[i3 + 2] + scatter[i3 + 2] * d;
 
       // ---- subtle life ----
       tx += Math.sin(t * 0.62 + sx * 31.0) * noiseAmp;
@@ -501,17 +602,7 @@ function ParticleField({
       pos[i3 + 2] += vz * dt;
     }
 
-    uniforms.uMachine.value += (morphSum / COUNT - uniforms.uMachine.value) * Math.min(1, dt * 2);
     (geometry.getAttribute("position") as THREE.BufferAttribute).needsUpdate = true;
-
-    // ---- the machine emerges from the same field ----
-    const mesh = meshRef.current;
-    if (mesh) {
-      const targetOpacity = THREE.MathUtils.clamp((p - 0.42) / 0.5, 0, 1);
-      machineMaterial.opacity += (targetOpacity - machineMaterial.opacity) * Math.min(1, dt * 1.8);
-      mesh.visible = machineMaterial.opacity > 0.01;
-      machineMaterial.emissive.setRGB(0, 0, running ? 0.035 : 0);
-    }
 
     // ---- cinematic camera: gentle pointer parallax, never a full orbit ----
     const px = pt.inside ? pt.ndc.x : 0;
@@ -523,17 +614,16 @@ function ParticleField({
 
   return (
     <group ref={groupRef}>
-      <points ref={pointsRef} geometry={geometry} material={material} frustumCulled={false} />
-      {/* dispose={null}: this geometry is the module-cached machine asset,
-          shared by whichever page is showing the field — it must survive
-          unmount so the next mount does not rebuild a 14 MB GLB. */}
-      <mesh
-        ref={meshRef}
-        material={machineMaterial}
-        visible={false}
-        frustumCulled={false}
-        dispose={null}
-      />
+      {/* the machine: a real point cloud sampled from the GLB surface */}
+      {machineGeometry && (
+        <points
+          geometry={machineGeometry}
+          material={machineMaterial}
+          frustumCulled={false}
+        />
+      )}
+      {/* the mark: per-particle CPU simulation, the interactive layer */}
+      <points geometry={geometry} material={material} frustumCulled={false} />
     </group>
   );
 }
