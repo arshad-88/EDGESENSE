@@ -155,63 +155,25 @@ interface SensorAnchorProps {
   selected: boolean;
 }
 
-/** Cyan vibration rings from the ADXL345 mount + click target. */
-function Adxl345Effect({ stateRef, position, onSelect, selected }: SensorAnchorProps) {
-  const group = useRef<THREE.Group>(null);
-  const marker = useRef<THREE.Group>(null);
-  const rings = useRef<THREE.Mesh[]>([]);
-  const RING_COUNT = 3;
-  useFrame((clockInfo) => {
-    const s = stateRef.current;
-    const t = clockInfo.clock.elapsedTime;
-    const on = s ? s.power === "ON" || s.power === "STARTING" : false;
-    const intensity = s ? Math.min(1, s.vibrationRms / 1.5) : 0;
-    // The marker itself is only drawn while the machine is running, so a
-    // standby machine is visually clean.
-    if (marker.current) marker.current.visible = on;
-    for (let i = 0; i < RING_COUNT; i++) {
-      const ring = rings.current[i];
-      if (!ring) continue;
-      const phase = (t * (0.5 + intensity * 1.2) + i / RING_COUNT) % 1;
-      ring.visible = on && intensity > 0.02;
-      // Kept deliberately small: the machine is ~1.0 unit long, so a ring
-      // wider than ~0.1 reads as a detached halo sitting in front of the
-      // body rather than vibration emanating from the sensor.
-      const scale = 0.012 + phase * (0.022 + intensity * 0.05);
-      ring.scale.setScalar(scale);
-      const mat = ring.material as THREE.MeshBasicMaterial;
-      mat.opacity = on ? (1 - phase) * (0.18 + intensity * 0.4) : 0;
-    }
-  });
+/**
+ * ADXL345 anchor — click target only, no drawn marker.
+ *
+ * The blue animated ring + centre dot and the three expanding blue halos that
+ * used to sit here have been removed: once the motor started they hovered over
+ * the housing and read as blue "highlighting circles" rather than as sensing
+ * emanations. The model already contains the real blue accelerometer mesh, so
+ * the only thing this group contributes now is the invisible click target.
+ * The orange INMP441 effects are intentionally left untouched.
+ */
+function Adxl345Effect({ position, onSelect }: SensorAnchorProps) {
   return (
     <group
-      ref={group}
       position={position}
       onClick={(e) => {
         e.stopPropagation();
         onSelect("ADXL345");
       }}
     >
-      {/* Marker: a flat footprint ring plus a centre dot, no text label.
-          Boxed name tags were visual clutter on the machine; the sensor is
-          identified by clicking it. Shown only while the machine runs so a
-          standby machine is unannotated. */}
-      <group ref={marker} visible={false}>
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.001, 0]}>
-          <ringGeometry args={[0.013, 0.019, 32]} />
-          <meshBasicMaterial
-            color="#38bdf8"
-            transparent
-            opacity={0.95}
-            side={THREE.DoubleSide}
-            depthTest={false}
-          />
-        </mesh>
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.0015, 0]}>
-          <circleGeometry args={[0.005, 20]} />
-          <meshBasicMaterial color="#38bdf8" depthTest={false} />
-        </mesh>
-      </group>
       {/* invisible click target over the sensor location */}
       <mesh
         position={[0, 0, 0]}
@@ -220,24 +182,12 @@ function Adxl345Effect({ stateRef, position, onSelect, selected }: SensorAnchorP
         <sphereGeometry args={[0.045, 8, 8]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
-      {Array.from({ length: RING_COUNT }, (_, i) => (
-        <mesh
-          key={i}
-          ref={(el) => {
-            if (el) rings.current[i] = el;
-          }}
-          rotation={[-Math.PI / 2, 0, 0]}
-        >
-          <ringGeometry args={[0.85, 1, 48]} />
-          <meshBasicMaterial color="#38bdf8" transparent opacity={0} side={THREE.DoubleSide} depthWrite={false} />
-        </mesh>
-      ))}
     </group>
   );
 }
 
 /** Orange acoustic ripples from the INMP441 position + click target. */
-function Inmp441Effect({ stateRef, position, onSelect, selected }: SensorAnchorProps) {
+function Inmp441Effect({ stateRef, position, onSelect }: SensorAnchorProps) {
   const group = useRef<THREE.Group>(null);
   const marker = useRef<THREE.Group>(null);
   const rings = useRef<THREE.Mesh[]>([]);
@@ -355,10 +305,11 @@ function MotorAssembly({
         <SpinPart geometry={split.rotor} stateRef={stateRef} />
       </MachineShake>
       {/*
-        Sensor effect anchors. The model already includes the physical ADXL345
-        (blue, top-left of housing) and INMP441 (near the pump inlet) meshes —
-        these groups only emit sensing waves from those positions and provide
-        the click targets; they never rotate.
+        Sensor anchors. The model already includes the physical ADXL345 (blue,
+        top-left of housing) and INMP441 (near the pump inlet) meshes. These
+        groups contribute the click targets and, for INMP441, the orange
+        acoustic ripples; the ADXL345 group draws nothing at all now. They
+        never rotate.
       */}
       {/*
         Sensor effect anchors. Both values are measured from the real GLB by

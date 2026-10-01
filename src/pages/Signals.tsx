@@ -14,6 +14,73 @@ import { cn } from "@/lib/utils";
 
 const VIB_FEATURES = ["rms", "variance", "peak", "kurtosis", "dominantFreq", "spectralEnergy"] as const;
 
+/**
+ * A real trace: the pipeline's downsampled raw window drawn as one connected
+ * polyline around a zero baseline — not a row of centred bars, which read as a
+ * solid rectangle and carried no information. Per-window auto-gain keeps the
+ * shape legible (frequency content is what changes with RPM / behaviour); the
+ * true peak is printed so the amplitude is never exaggerated silently.
+ */
+function Waveform({
+  samples,
+  color,
+  unit,
+  minFullScale,
+}: {
+  samples: number[];
+  color: string;
+  unit: string;
+  minFullScale: number;
+}) {
+  const peak = samples.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
+  const fullScale = Math.max(peak, minFullScale);
+  const W = 100;
+  const H = 100;
+  const mid = H / 2;
+  const n = samples.length;
+  const d = n
+    ? samples
+        .map((v, i) => {
+          const x = n > 1 ? (i / (n - 1)) * W : mid;
+          const y = mid - Math.max(-1, Math.min(1, v / fullScale)) * mid;
+          return `${i === 0 ? "M" : "L"}${x.toFixed(2)} ${y.toFixed(2)}`;
+        })
+        .join(" ")
+    : `M0 ${mid} L${W} ${mid}`;
+
+  return (
+    <div className="relative h-24 w-full">
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="h-full w-full">
+        {/* zero baseline */}
+        <line
+          x1={0}
+          y1={mid}
+          x2={W}
+          y2={mid}
+          stroke={color}
+          strokeOpacity={0.22}
+          strokeWidth={1}
+          strokeDasharray="2 3"
+          vectorEffect="non-scaling-stroke"
+        />
+        <path
+          d={d}
+          fill="none"
+          stroke={color}
+          strokeWidth={1.6}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          vectorEffect="non-scaling-stroke"
+          style={{ filter: `drop-shadow(0 0 3px ${color})` }}
+        />
+      </svg>
+      <span className="tnum pointer-events-none absolute right-0 top-0 font-mono text-[9px] tracking-wide text-muted-foreground/70">
+        PEAK {peak.toFixed(2)} {unit}
+      </span>
+    </div>
+  );
+}
+
 function FeatureRow({ name, value, baseline, tone }: { name: string; value: number; baseline?: number; tone?: string }) {
   const dev = baseline ? (value - baseline) / Math.max(Math.abs(baseline), 1e-6) : 0;
   return (
@@ -62,28 +129,23 @@ export default function Signals() {
                   <p className="label-tech mb-2 flex items-center gap-1.5">
                     <Activity className="size-3 text-sky-400" /> RAW WAVEFORM
                   </p>
-                  <div className="flex h-24 items-center gap-px">
-                    {running
-                      ? Array.from({ length: 96 }, (_, i) => {
-                          const v = Math.sin(i * 0.6 + machine.rpm / 90) * Math.sin(i * 0.11) * machine.vibrationRms;
-                          return (
-                            <span
-                              key={i}
-                              className="w-full min-w-[2px] rounded-full bg-sky-400/80"
-                              style={{ height: `${Math.min(100, Math.abs(v) * 220 + 4)}%`, opacity: 0.35 + Math.abs(v) * 0.8 }}
-                            />
-                          );
-                        })
-                      : (
-                          <div className="w-full text-center">
-                            <p className="text-[10px] font-bold tracking-[0.2em] text-muted-foreground">
-                              MACHINE OFF
-                            </p>
-                            <p className="mt-1 text-[11px] text-muted-foreground/70">
-                              Start the machine to begin acquisition.
-                            </p>
-                          </div>
-                        )}
+                  <div className="relative">
+                    <Waveform
+                      samples={running ? (vib?.samples ?? []) : []}
+                      color="#38bdf8"
+                      unit="g"
+                      minFullScale={0.3}
+                    />
+                    {!running ? (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center">
+                        <p className="text-[10px] font-bold tracking-[0.2em] text-muted-foreground">
+                          MACHINE OFF
+                        </p>
+                        <p className="mt-1 text-[11px] text-muted-foreground/70">
+                          Start the machine to begin acquisition.
+                        </p>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
                 <div>
@@ -121,28 +183,23 @@ export default function Signals() {
                   <p className="label-tech mb-2 flex items-center gap-1.5">
                     <AudioWaveform className="size-3 text-orange-400" /> RAW WAVEFORM
                   </p>
-                  <div className="flex h-24 items-center gap-px">
-                    {running
-                      ? Array.from({ length: 96 }, (_, i) => {
-                          const v = Math.sin(i * 0.7 + machine.rpm / 70) * Math.cos(i * 0.13) * (machine.acousticLevel / 90);
-                          return (
-                            <span
-                              key={i}
-                              className="w-full min-w-[2px] rounded-full bg-orange-400/80"
-                              style={{ height: `${Math.min(100, Math.abs(v) * 220 + 4)}%`, opacity: 0.35 + Math.abs(v) * 0.8 }}
-                            />
-                          );
-                        })
-                      : (
-                          <div className="w-full text-center">
-                            <p className="text-[10px] font-bold tracking-[0.2em] text-muted-foreground">
-                              MACHINE OFF
-                            </p>
-                            <p className="mt-1 text-[11px] text-muted-foreground/70">
-                              Start the machine to begin acquisition.
-                            </p>
-                          </div>
-                        )}
+                  <div className="relative">
+                    <Waveform
+                      samples={running ? (acou?.samples ?? []) : []}
+                      color="#fb923c"
+                      unit="rel"
+                      minFullScale={0.5}
+                    />
+                    {!running ? (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center">
+                        <p className="text-[10px] font-bold tracking-[0.2em] text-muted-foreground">
+                          MACHINE OFF
+                        </p>
+                        <p className="mt-1 text-[11px] text-muted-foreground/70">
+                          Start the machine to begin acquisition.
+                        </p>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
                 <div>

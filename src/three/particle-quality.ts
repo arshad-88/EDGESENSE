@@ -106,7 +106,9 @@ const TIERS: Record<QualityTier, Omit<QualityBudget, "reducedMotion" | "force" |
     space: 30_000,
     interaction: 6_000,
     bloom: true,
-    bloomStrength: 0.62,
+    // Deliberately low: with 100k+ additive points a strong bloom turns the
+    // machine into a white blob and destroys the silhouette.
+    bloomStrength: 0.4,
     dpr: [1, 1.75],
   },
   medium: {
@@ -115,7 +117,7 @@ const TIERS: Record<QualityTier, Omit<QualityBudget, "reducedMotion" | "force" |
     space: 18_000,
     interaction: 4_000,
     bloom: true,
-    bloomStrength: 0.5,
+    bloomStrength: 0.3,
     dpr: [1, 1.5],
   },
   low: {

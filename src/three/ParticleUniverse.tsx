@@ -106,10 +106,10 @@ const GLB_URL = "/motor.glb";
 
 /** Additive point brightness. Deliberately restrained: 100k+ additive points
  *  saturate fast, and over-exposing is a hard failure. */
-const BODY_ALPHA = 0.19;
-const FLOOR_ALPHA = 0.07;
-const ENERGY_ALPHA = 0.24;
-const NODE_ALPHA = 0.8;
+const BODY_ALPHA = 0.16;
+const FLOOR_ALPHA = 0.06;
+const ENERGY_ALPHA = 0.28;
+const NODE_ALPHA = 0.85;
 const FLARE_ALPHA = 0.06;
 
 /** How far the cursor shoves the machine, in object units. */
@@ -250,12 +250,14 @@ void main() {
     twinkle = 0.66 + 0.34 * sin(uTime * (0.35 + aSeed.y * 0.75) + aSeed.z * 43.0);
   }
 
-  float base = aKind < 0.5 ? 0.52 : (aKind < 1.5 ? 0.26 : 0.05);
+  float base = aKind < 0.5 ? 0.34 : (aKind < 1.5 ? 0.17 : 0.045);
   vAlpha = base * twinkle * uGlow;
 
-  vec3 star   = vec3(0.80, 0.87, 1.00);
-  vec3 drift  = vec3(0.34, 0.62, 0.84);
-  vec3 fore   = vec3(0.52, 0.68, 0.90);
+  // Cool and dim on purpose: the background must never compete with the
+  // machine, and white is an accent rather than a default.
+  vec3 star   = vec3(0.62, 0.74, 0.98);
+  vec3 drift  = vec3(0.26, 0.50, 0.78);
+  vec3 fore   = vec3(0.40, 0.58, 0.86);
   vColor = aKind < 0.5 ? star : (aKind < 1.5 ? drift : fore);
 
   gl_PointSize = clamp(aSize * uPixelScale / max(-mv.z, 0.6), 0.7, 64.0);
@@ -327,6 +329,17 @@ void main() {
   float away = (1.0 - uReveal) * (1.35 + aSeed.z * 2.6) * aAmp;
   pos += aScatter * away;
 
+  /* -------------------- perpetual micro-motion (§9) --------------------- */
+  // Even with the motor off the sculpture must not be frozen. A bounded
+  // sinusoidal drift (never accumulating, so the surface is preserved) keeps
+  // it alive, and it grows with uEnergy so a running machine breathes harder.
+  float driftAmp = 0.0055 + 0.0045 * aSeed.y;
+  pos += vec3(
+    sin(uTime * 1.05 + aSeed.x * 29.0),
+    sin(uTime * 0.87 + aSeed.y * 23.0),
+    sin(uTime * 1.27 + aSeed.z * 17.0)
+  ) * driftAmp * (1.0 + uEnergy * 2.2);
+
   /* ------------------- cursor force field (§21–25) --------------------- */
   // a real radial push with per-particle sensitivity, not an opacity trick
   vec3 d = pos - uPointer;
@@ -393,7 +406,7 @@ void main() {
   // the sculpture goes flat
   float near = smoothstep(-7.0, -4.55, mv.z);
   float appear = smoothstep(0.02, 0.32, uReveal);
-  float depthFade = mix(0.42, 1.0, near);
+  float depthFade = mix(0.28, 1.0, near);
 
   float base = aKind < 0.5 ? ${BODY_ALPHA.toFixed(3)}
              : aKind < 1.5 ? ${FLOOR_ALPHA.toFixed(3)}
@@ -410,9 +423,11 @@ void main() {
      (+X, screen left) and the orange sensor toward the pump end, always keyed
      off the HOME position so colour does not swim as particles move */
   float side = clamp(position.x / 1.35, -1.0, 1.0);
-  vec3 steel  = vec3(0.62, 0.71, 0.90);
-  vec3 blueE  = vec3(0.22, 0.62, 1.00);
-  vec3 orangeE = vec3(1.00, 0.55, 0.20);
+  // The structural base is a DEEP blue-steel, not white: the palette is
+  // carried by electric blue/cyan and amber, with white kept as an accent.
+  vec3 steel  = vec3(0.17, 0.30, 0.55);
+  vec3 blueE  = vec3(0.12, 0.50, 1.00);
+  vec3 orangeE = vec3(1.00, 0.50, 0.16);
   vec3 bodyCol = side > 0.0
     ? mix(steel, blueE, side * 0.55)
     : mix(steel, orangeE, -side * 0.45);
@@ -607,7 +622,7 @@ function useSpaceMaterial(reducedMotion: boolean) {
       uPixelScale: { value: 1000 },
       uParallax: { value: new THREE.Vector2() },
       uGlow: { value: 1 },
-      uCore: { value: 0.4 },
+      uCore: { value: 0.22 },
     }),
     [],
   );
@@ -783,7 +798,7 @@ function Universe({
       uBlueAnchor: { value: new THREE.Vector3() },
       uOrangeAnchor: { value: new THREE.Vector3() },
       uSensorGain: { value: reducedMotion ? 0.5 : 1 },
-      uCore: { value: 0.6 },
+      uCore: { value: 0.3 },
     }),
     [calm, reducedMotion],
   );
@@ -809,7 +824,7 @@ function Universe({
       uPointer: { value: new THREE.Vector3(999, 999, 0) },
       uClick: { value: new THREE.Vector4(999, 999, 0, 99) },
       uWake: { value: 0 },
-      uCore: { value: 0.5 },
+      uCore: { value: 0.28 },
     }),
     [calm],
   );
@@ -1168,8 +1183,10 @@ function PostFX({
       const bloom = new UnrealBloomPass(
         new THREE.Vector2(size.width * pixelRatio, size.height * pixelRatio),
         strength,
-        0.85,
-        0.62,
+        // a tight radius and a HIGH threshold: only the bright particle cores
+        // bloom, so individual points stay legible instead of blowing out
+        0.45,
+        0.82,
       );
       c.addPass(bloom);
       c.addPass(new OutputPass());
@@ -1331,7 +1348,8 @@ export function ParticleUniverse({
           // ACES rolls off the highlights, which is what stops 100k+ additive
           // particles from blowing out to flat white
           toneMapping: THREE.ACESFilmicToneMapping,
-          toneMappingExposure: 1.06,
+          // dark, deep, high-contrast: exposure is pulled DOWN, never up
+          toneMappingExposure: 0.82,
         }}
         onCreated={({ gl }) => {
           gl.setClearColor(0x000000, 1);
