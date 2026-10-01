@@ -1,7 +1,7 @@
 import '@vly-ai/integrations';
 import { Toaster } from "@/components/ui/sonner";
 import { RequireAuth } from "@/components/RequireAuth";
-import { MachineLayout } from "@/hooks/machine-context";
+import { MachineLayout, MachineProvider } from "@/hooks/machine-context";
 import { VlyToolbar } from "../vly-toolbar-readonly.tsx";
 import { ConvexAuthProvider } from "@convex-dev/auth/react";
 import { ConvexReactClient } from "convex/react";
@@ -120,37 +120,44 @@ createRoot(document.getElementById("root")!).render(
         <VlyToolbar />
       </ToolbarErrorBoundary>
       <ConvexAuthProvider client={convex}>
-        <BrowserRouter>
-          <RouteSyncer />
-          <Suspense fallback={<RouteLoading />}>
-            <Routes>
-              <Route path="/" element={<Landing />} />
-              <Route
-                path="/auth"
-                element={<AuthPage redirectAfterAuth="/dashboard" />}
-              />
-              {/* ONE machine state for the whole command center.
-                  `MachineLayout` is a layout route, so React keeps the single
-                  simulation engine (timer, audio, pipeline, edge link) mounted
-                  while the child page swaps — that is what makes START MOTOR
-                  carry across COMMAND → SIGNALS → BEHAVIOUR → INVESTIGATION. */}
-              <Route
-                element={
-                  <RequireAuth>
-                    <MachineLayout />
-                  </RequireAuth>
-                }
-              >
-                <Route path="/dashboard" element={<Dashboard />} />
-                <Route path="/signals" element={<Signals />} />
-                <Route path="/behaviour" element={<Behaviour />} />
-                <Route path="/investigation" element={<Investigation />} />
-                <Route path="/simulator" element={<Simulator />} />
-              </Route>
-              <Route path="*" element={<NotFound />} />
-            </Routes>
-          </Suspense>
-        </BrowserRouter>
+        {/* ONE machine state for the whole application. The provider sits above
+            the router, so the public landing page, the auth screen and every
+            signed-in page read the same simulation engine: the visitor can
+            start the machine on the landing page and it is the same running
+            machine waiting in the command center. `MachineLayout` is kept as a
+            layout route so the authenticated group still has a single mount
+            point guarded by `RequireAuth`. */}
+        <MachineProvider>
+          <BrowserRouter>
+            <RouteSyncer />
+            <Suspense fallback={<RouteLoading />}>
+              <Routes>
+                <Route path="/" element={<Landing />} />
+                <Route
+                  path="/auth"
+                  element={<AuthPage redirectAfterAuth="/dashboard" />}
+                />
+                {/* `MachineLayout` is a layout route, so React keeps the page
+                    mounted while the child route swaps — START MOTOR carries
+                    across COMMAND → SIGNALS → BEHAVIOUR → INVESTIGATION. */}
+                <Route
+                  element={
+                    <RequireAuth>
+                      <MachineLayout />
+                    </RequireAuth>
+                  }
+                >
+                  <Route path="/dashboard" element={<Dashboard />} />
+                  <Route path="/signals" element={<Signals />} />
+                  <Route path="/behaviour" element={<Behaviour />} />
+                  <Route path="/investigation" element={<Investigation />} />
+                  <Route path="/simulator" element={<Simulator />} />
+                </Route>
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </Suspense>
+          </BrowserRouter>
+        </MachineProvider>
         <Toaster />
       </ConvexAuthProvider>
     </RootErrorBoundary>

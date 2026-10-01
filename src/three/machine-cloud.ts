@@ -18,34 +18,60 @@
  * read as a surface while still letting the small features claim a
  * disproportionate, and therefore legible, share of particles.
  *
- * On top of the sampled body the same typed arrays carry the machine's energy
- * systems — blue vibration rings and a waveform off the pump end, orange
- * acoustic arcs and a waveform off the motor/fan end, and a dim mirrored
- * reflection of the real silhouette on the floor. All of it is additive offset
- * space around real geometry, so every particle always knows the exact GLB
- * position it belongs to.
+ * On top of the sampled body the same typed arrays carry everything the field
+ * can become:
+ *
+ *   home     the machine (every arrangement returns here)
+ *   stream   the two sensor streams merging into the decision column
+ *   cloud    the learned-normal behaviour volume
+ *   kinds    the energy systems, sensor nodes and their flare
+ *
+ * ── Sensor sides are NOT decorative ────────────────────────────────────────
+ * The ADXL345 is the accelerometer bolted to the MOTOR housing, which sits at
+ * POSITIVE X (which projects to screen LEFT). It is the blue sensor, so the
+ * blue vibration energy radiates from `sensorAnchors.blue`. The INMP441 is the
+ * microphone on the PUMP side at NEGATIVE X and is orange. Both energy systems
+ * are anchored on `SENSOR_ANCHORS` — the same coordinates the dashboard marks —
+ * so the landing page cannot drift from the machine it is showing. Reversing
+ * them is a hard visual failure, so `__tests__/machine-cloud.test.ts` asserts
+ * the sides against the real GLB.
  */
 import * as THREE from "three";
 import { OBJ_W, rnd } from "./emblem";
+import { SENSOR_ANCHORS } from "./sensor-anchors";
 
 const TAU = Math.PI * 2;
 
-/** Particle budget by role. The body dominates so the silhouette reads. */
-export const BODY_SHARE = 0.72;
-export const REFLECT_SHARE = 0.08;
-export const BLUE_SHARE = 0.09;
-/* the remaining 0.11 is the orange acoustic system */
+/* ------------------------------- the budget ------------------------------- */
 
-/** Blue vibration energy belongs to the pump end (negative X = screen left). */
-const PUMP_HUB = 0.16;
-/** Orange acoustic arcs radiate off the motor/fan end (positive X). */
-const FAN_HUB = 0.92;
-/** Vertical centre of both energy systems, as a fraction of the machine height. */
-const HUB_Y = 0.58;
-/** Ripple geometry: four bands, squashed in X so they hug the machine. */
-const RING_BASE = 0.36;
-const RING_STEP = 0.2;
-const RING_SQUASH = 0.85;
+/** The body dominates so the silhouette reads. */
+export const BODY_SHARE = 0.672;
+export const REFLECT_SHARE = 0.07;
+/** Blue vibration energy, off the motor end (ADXL345, +X). */
+export const BLUE_SHARE = 0.085;
+/** Orange acoustic energy, off the pump end (INMP441, −X). */
+export const ORANGE_SHARE = 0.1;
+/** Tight, very bright clusters exactly on the two sensors. */
+export const NODE_BLUE_SHARE = 0.014;
+export const NODE_ORANGE_SHARE = 0.016;
+/** Wide soft halo on each sensor — the "glow around the active sensor". */
+export const FLARE_BLUE_SHARE = 0.02;
+/* the remainder is the orange flare */
+
+/* ------------------------------- geometry -------------------------------- */
+
+/** Ripple geometry: four bands around each sensor, squashed in X so they hug the machine. */
+const RING_BASE = 0.3;
+const RING_STEP = 0.15;
+const RING_SQUASH = 0.92;
+
+/** Where the two signal streams merge, and where the decision column stands. */
+const MERGE_X = -0.3;
+const DECISION_X = -1.95;
+
+/** The learned-normal volume: a dense ellipsoid plus a thin envelope shell. */
+const CLOUD_AXES: [number, number, number] = [1.32, 0.86, 1.24];
+const CLOUD_CENTRE: [number, number, number] = [0.35, 0.08, 0];
 
 export interface MachineAsset {
   /** Baked into the same object space as the emblem: centred on the origin and
@@ -53,6 +79,17 @@ export interface MachineAsset {
   geometry: THREE.BufferGeometry;
   bmin: THREE.Vector3;
   bsize: THREE.Vector3;
+  /** Centre of the raw model, in the GLB's own coordinates. */
+  center: THREE.Vector3;
+  /** Uniform scale applied by the bake (raw units → object units). */
+  scale: number;
+}
+
+export interface SensorAnchors {
+  /** ADXL345 — accelerometer on the motor housing. Blue. */
+  blue: [number, number, number];
+  /** INMP441 — microphone on the pump side. Orange. */
+  orange: [number, number, number];
 }
 
 export interface MachineCloud {
@@ -63,9 +100,16 @@ export interface MachineCloud {
   /** How far that particle is willing to travel. */
   amp: Float32Array;
   size: Float32Array;
-  /** 0 body · 1 floor reflection · 2 blue vibration energy · 3 orange acoustics */
+  /** 0 body · 1 floor · 2 blue energy · 3 orange energy ·
+   *  4 blue node · 5 orange node · 6 blue flare · 7 orange flare */
   kind: Float32Array;
   seed: Float32Array;
+  /** SIGNAL_FLOW target: position along one of the two sensor streams. */
+  stream: Float32Array;
+  /** LEARNED_NORMAL target: a point in the behaviour volume. */
+  cloud: Float32Array;
+  /** Where the two sensors actually are, in the baked object space. */
+  anchors: SensorAnchors;
   floorY: number;
   count: number;
 }
@@ -73,6 +117,9 @@ export interface MachineCloud {
 /**
  * Centre the machine on the origin and normalise it to `OBJ_W` wide, so a
  * single layout transform can frame the mark and the machine identically.
+ *
+ * `center` and `scale` are returned because sensor anchors defined in the GLB's
+ * own coordinates have to be pushed through exactly the same transform.
  */
 export function bakeMachineGeometry(geometry: THREE.BufferGeometry): MachineAsset {
   const baked = geometry.clone();
@@ -90,7 +137,24 @@ export function bakeMachineGeometry(geometry: THREE.BufferGeometry): MachineAsse
     geometry: baked,
     bmin: nb.min.clone(),
     bsize: nb.getSize(new THREE.Vector3()),
+    center,
+    scale: k,
   };
+}
+
+/**
+ * Push a point from the GLB's coordinates into the baked object space.
+ * (translate by −center, then scale — the order the bake uses.)
+ */
+export function bakePoint(
+  p: readonly [number, number, number],
+  asset: MachineAsset,
+): [number, number, number] {
+  return [
+    (p[0] - asset.center.x) * asset.scale,
+    (p[1] - asset.center.y) * asset.scale,
+    (p[2] - asset.center.z) * asset.scale,
+  ];
 }
 
 export type SurfaceSampler = (
@@ -166,10 +230,87 @@ export function makeSurfaceSampler(geometry: THREE.BufferGeometry): SurfaceSampl
   };
 }
 
+/* --------------------------- the arrangements ---------------------------- */
+
 /**
- * Sample the GLB surface into the particle targets, then append the machine's
- * energy systems and floor reflection — one flat typed-array set that a single
- * BufferGeometry can carry.
+ * SIGNAL_FLOW: a particle's position along one of the two sensor streams.
+ *
+ * `t` runs 0..1 along the journey. For the first 70% a particle travels from
+ * its own sensor into the merge point, drifting through depth so the stream
+ * reads as a 3D ribbon rather than a line; the last 30% leaves the merge as a
+ * single channel into the decision column (screen right), where the vertical
+ * spread is the evidence fanning out.
+ */
+export function streamTarget(
+  t: number,
+  side: 0 | 1,
+  seedA: number,
+  seedB: number,
+  seedC: number,
+  out: Float32Array,
+  o: number,
+): void {
+  const startX = side === 0 ? 1.3 : -1.02;
+  const startY = side === 0 ? 0.82 : -0.74;
+  const startZ = side === 0 ? -0.55 : -0.7;
+
+  if (t < 0.7) {
+    const u = t / 0.7;
+    const ex = startX + (MERGE_X - startX) * u;
+    const ey = startY + (0 - startY) * u;
+    const ez = startZ + (-1.55 - startZ) * u;
+    out[o] = ex + Math.sin(u * 5.5 + seedA * 4) * 0.11;
+    out[o + 1] = ey + Math.sin(u * 7.0 + seedB * 5) * 0.27;
+    out[o + 2] = ez + Math.sin(u * 4.0 + seedC * 6) * 0.42;
+  } else {
+    const v = (t - 0.7) / 0.3;
+    out[o] = MERGE_X + (DECISION_X - MERGE_X) * v + Math.sin(v * 6.0) * 0.09;
+    out[o + 1] =
+      Math.sin(v * 6.5 + (side === 0 ? 0 : Math.PI)) * 1.02 * (1 - 0.3 * v);
+    out[o + 2] = -1.55 + (0.75 - -1.55) * v + Math.cos(v * 5.0 + seedA * 6) * 0.34;
+  }
+
+  // tube thickness: nearby particles travel together but not coincidentally
+  out[o] += (seedA - 0.5) * 0.13;
+  out[o + 1] += (seedB - 0.5) * 0.16;
+  out[o + 2] += (seedC - 0.5) * 0.2;
+}
+
+/**
+ * LEARNED_NORMAL: the behaviour volume every healthy window lands inside — a
+ * dense ellipsoid, plus ~18% of the budget on a slightly wider envelope shell so
+ * the region reads as *bounded* rather than as a loose blur.
+ */
+export function cloudTarget(
+  i: number,
+  out: Float32Array,
+  o: number,
+  i3: number,
+): void {
+  const onShell = rnd(i, 51) < 0.18;
+  // gaussian-ish radius: the cube root of a uniform gives a filled volume,
+  // biasing toward the middle where healthy behaviour actually clusters
+  let r = Math.pow(rnd(i, 52), 0.42);
+  if (onShell) r = 1 + 0.06 + rnd(i, 53) * 0.08;
+  const u = rnd(i, 54) * 2 - 1;
+  const phi = rnd(i, 55) * TAU;
+  const s = Math.sqrt(Math.max(0, 1 - u * u));
+  out[o] = CLOUD_CENTRE[0] + Math.cos(phi) * s * r * CLOUD_AXES[0];
+  out[o + 1] = CLOUD_CENTRE[1] + u * r * CLOUD_AXES[1];
+  out[o + 2] = CLOUD_CENTRE[2] + Math.sin(phi) * s * r * CLOUD_AXES[2];
+  // a whisper of jitter keeps the shell from looking extruded
+  out[o] += (rnd(i, 56) - 0.5) * 0.05;
+  out[o + 1] += (rnd(i, 57) - 0.5) * 0.05;
+  out[o + 2] += (rnd(i, 58) - 0.5) * 0.05;
+  void i3;
+}
+
+/* ------------------------------ the builder ------------------------------ */
+
+/**
+ * Sample the GLB surface into the particle targets, then append the energy
+ * systems, sensor nodes, flare, floor reflection and the two alternative
+ * arrangements — one flat typed-array set a single BufferGeometry can carry.
  */
 export function buildMachineCloud(asset: MachineAsset, count: number): MachineCloud {
   const home = new Float32Array(count * 3);
@@ -178,20 +319,29 @@ export function buildMachineCloud(asset: MachineAsset, count: number): MachineCl
   const size = new Float32Array(count);
   const kind = new Float32Array(count);
   const seed = new Float32Array(count * 3);
+  const stream = new Float32Array(count * 3);
+  const cloud = new Float32Array(count * 3);
 
   const sample = makeSurfaceSampler(asset.geometry);
+
+  /** The sensors, in baked object space — the energy systems are anchored here. */
+  const anchors: SensorAnchors = {
+    blue: bakePoint(SENSOR_ANCHORS.ADXL345, asset),
+    orange: bakePoint(SENSOR_ANCHORS.INMP441, asset),
+  };
+  const [bx, by, bz] = anchors.blue;
+  const [ox, oy, oz] = anchors.orange;
 
   const bodyEnd = Math.round(count * BODY_SHARE);
   const reflectEnd = bodyEnd + Math.round(count * REFLECT_SHARE);
   const blueEnd = reflectEnd + Math.round(count * BLUE_SHARE);
+  const orangeEnd = blueEnd + Math.round(count * ORANGE_SHARE);
+  const nodeBlueEnd = orangeEnd + Math.round(count * NODE_BLUE_SHARE);
+  const nodeOrangeEnd = nodeBlueEnd + Math.round(count * NODE_ORANGE_SHARE);
+  const flareBlueEnd = nodeOrangeEnd + Math.round(count * FLARE_BLUE_SHARE);
+  /* everything past flareBlueEnd is the orange flare */
 
-  const x0 = asset.bmin.x;
   const y0 = asset.bmin.y;
-  const w = asset.bsize.x;
-  const hgt = asset.bsize.y;
-  const pumpHubX = x0 + PUMP_HUB * w;
-  const fanHubX = x0 + FAN_HUB * w;
-  const hubY = y0 + HUB_Y * hgt;
 
   for (let i = 0; i < count; i++) {
     const i3 = i * 3;
@@ -208,7 +358,11 @@ export function buildMachineCloud(asset: MachineAsset, count: number): MachineCl
       sample(home, i3, h, h2, h3);
       if (i < bodyEnd) {
         kind[i] = 0;
-        size[i] = 0.009 + Math.pow(h4, 2.0) * 0.0125;
+        // Visible, varied points — a dense luminous sculpture, not pixels.
+        // The low end is ~4 device pixels at the hero framing and the exponent
+        // keeps most of the field near it, so the large ones read as highlights
+        // on the structure rather than as a uniform haze.
+        size[i] = 0.022 + Math.pow(h4, 2.0) * 0.042;
         amp[i] = 0.3 + Math.pow(h3, 1.7) * 1.85;
       } else {
         /* ---- reflective floor: the same silhouette, mirrored shallowly
@@ -217,49 +371,94 @@ export function buildMachineCloud(asset: MachineAsset, count: number): MachineCl
         home[i3] *= 0.97;
         home[i3 + 1] = y0 - (home[i3 + 1] - y0) * 0.4;
         home[i3 + 2] = home[i3 + 2] * 0.9 - 0.1;
-        size[i] = 0.0075 + h4 * 0.006;
+        size[i] = 0.016 + h4 * 0.016;
         amp[i] = 0.22 + h3 * 0.9;
       }
     } else if (i < blueEnd) {
-      /* ---- blue vibration energy off the pump end ---- */
+      /* ---- BLUE vibration energy, radiating from the ADXL345 on the motor ---- */
       kind[i] = 2;
       if (h4 < 0.62) {
-        // concentric ripple rings around the pump housing
         const band = Math.floor(h * 4);
-        const radius = RING_BASE + band * RING_STEP + (h2 - 0.5) * 0.045;
+        const radius = RING_BASE + band * RING_STEP + (h2 - 0.5) * 0.04;
         const angle = h3 * TAU + band * 0.7;
-        home[i3] = pumpHubX + Math.cos(angle) * radius * RING_SQUASH;
-        home[i3 + 1] = hubY + Math.sin(angle) * radius;
-        home[i3 + 2] = (rnd(i, 25) - 0.5) * 0.75;
+        home[i3] = bx + Math.cos(angle) * radius * RING_SQUASH;
+        home[i3 + 1] = by + Math.sin(angle) * radius;
+        home[i3 + 2] = bz + (rnd(i, 25) - 0.5) * 0.7;
       } else {
-        // the vibration waveform trailing off to the left
+        // the vibration waveform trailing off the motor end (screen left)
         const u = h2;
-        home[i3] = x0 + 0.13 * w + Math.sin(u * 4.0) * 0.06;
+        home[i3] = bx + 0.16 + u * 0.95 + Math.sin(u * 4.0) * 0.06;
         home[i3 + 1] =
-          hubY + Math.sin(u * 17.0) * 0.42 * (0.3 + 0.7 * Math.sin(Math.PI * u));
-        home[i3 + 2] = (h3 - 0.5) * 0.24;
+          by + Math.sin(u * 17.0) * 0.4 * (0.3 + 0.7 * Math.sin(Math.PI * u));
+        home[i3 + 2] = bz + (h3 - 0.5) * 0.24;
       }
-      size[i] = 0.01 + Math.pow(h4, 1.8) * 0.014;
+      size[i] = 0.024 + Math.pow(h4, 1.8) * 0.046;
       amp[i] = 0.35 + h * 1.3;
-    } else {
-      /* ---- orange acoustic arcs radiating off the motor/fan end ---- */
+    } else if (i < orangeEnd) {
+      /* ---- ORANGE acoustic energy, radiating from the INMP441 on the pump ---- */
       kind[i] = 3;
       if (h4 < 0.58) {
         const band = Math.floor(h * 4);
-        const radius = RING_BASE + band * RING_STEP + (h2 - 0.5) * 0.05;
+        const radius = RING_BASE + band * RING_STEP + (h2 - 0.5) * 0.045;
         const angle = h3 * TAU + band * 0.7;
-        home[i3] = fanHubX + Math.cos(angle) * radius * RING_SQUASH;
-        home[i3 + 1] = hubY + Math.sin(angle) * radius;
-        home[i3 + 2] = (rnd(i, 26) - 0.5) * 0.8;
+        home[i3] = ox + Math.cos(angle) * radius * RING_SQUASH;
+        home[i3 + 1] = oy + Math.sin(angle) * radius;
+        home[i3 + 2] = oz + (rnd(i, 26) - 0.5) * 0.75;
       } else {
         const u = h2;
-        home[i3] = x0 + 0.95 * w + Math.sin(u * 4.0) * 0.06;
+        home[i3] = ox - 0.16 - u * 0.95 + Math.sin(u * 4.0) * 0.06;
         home[i3 + 1] =
-          hubY + Math.sin(u * 23.0) * 0.46 * (0.3 + 0.7 * Math.sin(Math.PI * u));
-        home[i3 + 2] = (h3 - 0.5) * 0.26;
+          oy + Math.sin(u * 23.0) * 0.44 * (0.3 + 0.7 * Math.sin(Math.PI * u));
+        home[i3 + 2] = oz + (h3 - 0.5) * 0.26;
       }
-      size[i] = 0.01 + Math.pow(h4, 1.8) * 0.015;
+      size[i] = 0.024 + Math.pow(h4, 1.8) * 0.048;
       amp[i] = 0.4 + h * 1.5;
+    } else if (i < nodeBlueEnd) {
+      /* ---- the ADXL345 itself: a tight, bright cluster on the accelerometer ---- */
+      kind[i] = 4;
+      const u = rnd(i, 27) * 2 - 1;
+      const phi = h * TAU;
+      const s = Math.sqrt(Math.max(0, 1 - u * u));
+      const rr = 0.05 + h4 * 0.055;
+      home[i3] = bx + Math.cos(phi) * s * rr * 1.5;
+      home[i3 + 1] = by + u * rr * 0.8 + 0.01;
+      home[i3 + 2] = bz + Math.sin(phi) * s * rr;
+      size[i] = 0.044 + Math.pow(h4, 1.6) * 0.062;
+      amp[i] = 0.25 + h2 * 0.5;
+    } else if (i < nodeOrangeEnd) {
+      /* ---- the INMP441 itself: a tight cluster on the microphone head ---- */
+      kind[i] = 5;
+      const u = rnd(i, 28) * 2 - 1;
+      const phi = h * TAU;
+      const s = Math.sqrt(Math.max(0, 1 - u * u));
+      const rr = 0.045 + h4 * 0.05;
+      home[i3] = ox + Math.cos(phi) * s * rr;
+      home[i3 + 1] = oy + u * rr + 0.012;
+      home[i3 + 2] = oz + Math.sin(phi) * s * rr;
+      size[i] = 0.044 + Math.pow(h4, 1.6) * 0.062;
+      amp[i] = 0.25 + h2 * 0.5;
+    } else if (i < flareBlueEnd) {
+      /* ---- the glow around the active accelerator: wide, soft, additive ---- */
+      kind[i] = 6;
+      const u = rnd(i, 29) * 2 - 1;
+      const phi = h * TAU;
+      const s = Math.sqrt(Math.max(0, 1 - u * u));
+      home[i3] = bx + Math.cos(phi) * s * 0.3;
+      home[i3 + 1] = by + u * 0.3 + 0.02;
+      home[i3 + 2] = bz + Math.sin(phi) * s * 0.3;
+      size[i] = 0.14 + h4 * 0.34;
+      amp[i] = 0.3 + h2 * 0.7;
+    } else {
+      /* ---- ...and around the microphone ---- */
+      kind[i] = 7;
+      const u = rnd(i, 30) * 2 - 1;
+      const phi = h * TAU;
+      const s = Math.sqrt(Math.max(0, 1 - u * u));
+      home[i3] = ox + Math.cos(phi) * s * 0.28;
+      home[i3 + 1] = oy + u * 0.28 + 0.02;
+      home[i3 + 2] = oz + Math.sin(phi) * s * 0.28;
+      size[i] = 0.14 + h4 * 0.36;
+      amp[i] = 0.3 + h2 * 0.7;
     }
 
     /* ---- dispersion direction: outward from the machine, with depth ---- */
@@ -270,7 +469,34 @@ export function buildMachineCloud(asset: MachineAsset, count: number): MachineCl
     scatter[i3] = dx / len;
     scatter[i3 + 1] = dy / len;
     scatter[i3 + 2] = dz / len;
+
+    /* ---- the two alternative arrangements ---- */
+    // Streams are split by the side the particle already belongs to, so the
+    // blue stream is literally made of the blue particles.
+    const blueSide = home[i3] >= 0;
+    streamTarget(
+      h4,
+      blueSide ? 0 : 1,
+      rnd(i, 34),
+      rnd(i, 35),
+      rnd(i, 36),
+      stream,
+      i3,
+    );
+    cloudTarget(i, cloud, i3, i3);
   }
 
-  return { home, scatter, amp, size, kind, seed, floorY: y0, count };
+  return {
+    home,
+    scatter,
+    amp,
+    size,
+    kind,
+    seed,
+    stream,
+    cloud,
+    anchors,
+    floorY: y0,
+    count,
+  };
 }
