@@ -682,25 +682,47 @@ interface PointerSample {
   t: number;
 }
 
+/**
+ * Universe — everything that must live INSIDE the canvas.
+ *
+ * `useFrame` and `useThree` only work within react-three-fiber's context, so
+ * this component is mounted as a child of `<Canvas>` rather than around it. It
+ * owns the geometry, the materials, the pointer listeners and the animation
+ * loop; the canvas element, the quality budget and the WebGL capability probe
+ * live one level up (see `ParticleUniverse`). Getting that boundary wrong is
+ * what produces "Hooks can only be used within the Canvas component".
+ */
+interface UniverseProps {
+  budget: QualityBudget;
+  revealRef?: React.MutableRefObject<number>;
+  storyRef?: React.RefObject<number>;
+  stateRef?: React.RefObject<UniverseState | null>;
+  calm: boolean;
+  onReady?: () => void;
+  onStats?: (stats: {
+    machine: number;
+    space: number;
+    tier: QualityTier;
+    bloom: boolean;
+  }) => void;
+  /** The loop reporting sustained slowness: shed bloom and pixel ratio. */
+  onDegraded: () => void;
+  /** The bloom pass itself failed: drop a whole quality tier. */
+  onBloomUnavailable: () => void;
+}
+
 function Universe({
+  budget,
   revealRef,
   storyRef,
   stateRef,
   calm = false,
-  className,
   onReady,
   onStats,
-}: ParticleUniverseProps) {
-  /* tier is decided once, then can only step down */
-  const initialTier = useMemo<QualityTier>(() => detectQualityTier(), []);
-  const reducedMotion = useMemo(() => prefersReducedMotion(), []);
-  const [tier, setTier] = useState<QualityTier>(initialTier);
-  const [degraded, setDegraded] = useState(false);
-  const budget = useMemo<QualityBudget>(() => {
-    const b = qualityBudget(tier, reducedMotion);
-    // a runtime downgrade keeps the density but drops the expensive extras
-    return degraded ? { ...b, bloom: false, dpr: [1, 1.15] } : b;
-  }, [tier, reducedMotion, degraded]);
+  onDegraded,
+  onBloomUnavailable,
+}: UniverseProps) {
+  const reducedMotion = budget.reducedMotion;
 
   useEffect(() => {
     onStats?.({
@@ -711,7 +733,6 @@ function Universe({
     });
   }, [budget, onStats]);
 
-  const rootRef = useRef<THREE.Group>(null);
   const machineRef = useRef<THREE.Group>(null);
 
   /* ------------------------ machine point cloud ------------------------ */
@@ -895,16 +916,15 @@ function Universe({
   const camLook = useRef(new THREE.Vector3());
   const watchdog = useRef(createFpsWatchdog());
   useFrame((state, delta) => {
-    const root = rootRef.current;
     const machineGroup = machineRef.current;
-    if (!root || !machineGroup) return;
+    if (!machineGroup) return;
 
     const dt = Math.min(0.033, Math.max(0.001, delta));
 
     /* ---------------- runtime quality watchdog (§49) ------------------ */
     if (state.clock.elapsedTime > 3 && watchdog.current(delta * 1000)) {
       console.warn("[EdgeSense] sustained slow frames — dropping bloom and pixel ratio");
-      setDegraded(true);
+      onDegraded();
     }
 
     clock.current += dt * (calm ? 0.7 : 1);
@@ -1073,50 +1093,30 @@ function Universe({
   });
 
   return (
-    <div className={className} aria-hidden="true">
-      <Canvas
-        camera={{ position: [-0.2, 1.6, -8.0], fov: 42, near: 0.1, far: 400 }}
-        dpr={budget.dpr}
-        gl={{
-          antialias: false,
-          alpha: false,
-          powerPreference: "high-performance",
-          // ACES rolls off the highlights, which is what stops 100k+ additive
-          // particles from blowing out to flat white
-          toneMapping: THREE.ACESFilmicToneMapping,
-          toneMappingExposure: 1.06,
-        }}
-        onCreated={({ gl }) => {
-          gl.setClearColor(0x000000, 1);
-        }}
-        style={{ background: "#02030a" }}
-      >
-        <group ref={rootRef}>
-          <Backdrop />
-          <SpaceLayer count={budget.space} material={spaceMaterial} />
-          {/* the machine lives in its own group: the state machine moves this,
-              never the particles */}
-          <group ref={machineRef}>
-            {machineGeometry && (
-              <points
-                geometry={machineGeometry}
-                material={machineMaterial}
-                frustumCulled={false}
-              />
-            )}
-          </group>
-          {/* the tactile near-field, plus its lagged copy: the motion wake */}
-          <points geometry={sparkGeometry} material={wakeMaterial} frustumCulled={false} />
-          <points geometry={sparkGeometry} material={sparkMaterial} frustumCulled={false} />
-          {cloudError && <FallbackNote />}
-        </group>
-        <PostFX
-          enabled={budget.bloom}
-          strength={budget.bloomStrength}
-          onUnavailable={() => setTier((prev) => downgradeTier(prev))}
-        />
-      </Canvas>
-    </div>
+    <>
+      <Backdrop />
+      <SpaceLayer count={budget.space} material={spaceMaterial} />
+      {/* the machine lives in its own group: the state machine moves this,
+          never the particles */}
+      <group ref={machineRef}>
+        {machineGeometry && (
+          <points
+            geometry={machineGeometry}
+            material={machineMaterial}
+            frustumCulled={false}
+          />
+        )}
+      </group>
+      {/* the tactile near-field, plus its lagged copy: the motion wake */}
+      <points geometry={sparkGeometry} material={wakeMaterial} frustumCulled={false} />
+      <points geometry={sparkGeometry} material={sparkMaterial} frustumCulled={false} />
+      {cloudError && <FallbackNote />}
+      <PostFX
+        enabled={budget.bloom}
+        strength={budget.bloomStrength}
+        onUnavailable={onBloomUnavailable}
+      />
+    </>
   );
 }
 
@@ -1298,17 +1298,58 @@ export function ParticleUniverse({
   );
   const stableReady = useCallback(() => onReadyRef.current?.(), []);
 
+  /* ---------------------------- quality tier ---------------------------- */
+  /* decided once, then can only ever step down */
+  const initialTier = useMemo<QualityTier>(() => detectQualityTier(), []);
+  const reducedMotion = useMemo(() => prefersReducedMotion(), []);
+  const [tier, setTier] = useState<QualityTier>(initialTier);
+  const [degraded, setDegraded] = useState(false);
+  const budget = useMemo<QualityBudget>(() => {
+    const b = qualityBudget(tier, reducedMotion);
+    // a runtime downgrade keeps the density but drops the expensive extras
+    return degraded ? { ...b, bloom: false, dpr: [1, 1.15] } : b;
+  }, [tier, reducedMotion, degraded]);
+
+  /** The animation loop reporting sustained slowness. */
+  const handleDegraded = useCallback(() => setDegraded(true), []);
+
+  /** Bloom could not be created at all: step the budget down a tier, which
+   *  reduces density as well as dropping bloom. */
+  const handleBloomUnavailable = useCallback(() => setTier((prev) => downgradeTier(prev)), []);
+
   if (!webgl) return <StaticFallback className={className} />;
 
   return (
-    <Universe
-      revealRef={revealRef}
-      storyRef={storyRef}
-      stateRef={stateRef}
-      calm={calm}
-      className={className}
-      onReady={stableReady}
-      onStats={stableStats}
-    />
+    <div className={className} aria-hidden="true">
+      <Canvas
+        camera={{ position: [-0.2, 1.6, -8.0], fov: 42, near: 0.1, far: 400 }}
+        dpr={budget.dpr}
+        gl={{
+          antialias: false,
+          alpha: false,
+          powerPreference: "high-performance",
+          // ACES rolls off the highlights, which is what stops 100k+ additive
+          // particles from blowing out to flat white
+          toneMapping: THREE.ACESFilmicToneMapping,
+          toneMappingExposure: 1.06,
+        }}
+        onCreated={({ gl }) => {
+          gl.setClearColor(0x000000, 1);
+        }}
+        style={{ background: "#02030a" }}
+      >
+        <Universe
+          budget={budget}
+          revealRef={revealRef}
+          storyRef={storyRef}
+          stateRef={stateRef}
+          calm={calm}
+          onReady={stableReady}
+          onStats={stableStats}
+          onDegraded={handleDegraded}
+          onBloomUnavailable={handleBloomUnavailable}
+        />
+      </Canvas>
+    </div>
   );
 }
